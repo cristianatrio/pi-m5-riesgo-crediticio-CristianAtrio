@@ -1,0 +1,27 @@
+# Base entregada por Henry
+pandas
+numpy
+openpyxl
+python-dotenv
+db-dtypes
+jupyter
+notebook
+ipykernel
+seaborn
+ipywidgets
+scikit-learn
+xgboost
+pydantic
+fastapi
+uvicorn[standard]
+# Agregadas para este proyecto
+matplotlib
+scipy
+feature-engine
+lightgbm
+joblib
+streamlit
+requests
+pytest
+pytest-cov
+httpx

@@ -1,0 +1,34 @@
+# --- Entornos virtuales ---
+*-venv/
+venv/
+.venv/
+env/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Secretos y configuracion local ---
+.env
+*.local.json
+
+# --- Artefactos pesados / temporales ---
+# El modelo final serializado (mlops_pipeline/models/*.pkl) SI se versiona porque
+# la API y la imagen Docker lo necesitan. Se ignoran solo los experimentos.
+mlops_pipeline/models/experiments/
+mlops_pipeline/reports/tmp/
+*.log
+
+# --- IDE / SO ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

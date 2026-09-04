@@ -1,0 +1,8 @@
+{
+  "project_code": "pim5_riesgo_crediticio",
+  "project_name": "PI M5 - Modelo de riesgo crediticio",
+  "dataset_path": "Base_de_datos.csv",
+  "target": "Pago_atiempo",
+  "positive_class_label": "0 = no pago a tiempo (riesgo)",
+  "random_state": 42
+}
