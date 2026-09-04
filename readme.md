@@ -4,7 +4,7 @@ Proyecto Integrador del Modulo 5 (Data Science, Henry). Modelo de machine learni
 que anticipa si un nuevo solicitante de credito pagara a tiempo, desplegado como API
 (FastAPI + Docker) con monitoreo de data drift y una app Streamlit.
 
-> Estado actual: **V1.0.1** - carga de datos y EDA completos (`Cargar_datos.ipynb`, `comprension_eda.ipynb`).
+> Estado actual: **V1.0.2** - carga de datos y EDA completos y revisados (`Cargar_datos.ipynb`, `comprension_eda.ipynb`).
 >
 > Hallazgos clave del EDA: target desbalanceado (4,75% de mora), `puntaje` excluida por fuga de informacion,
 > senales principales `puntaje_datacredito`, `huella_consulta`, `edad_cliente` y `plazo_meses`.
@@ -40,6 +40,7 @@ readme.md
 |---|---|
 | V1.0.0 | Estructura de carpetas identica en las 3 ramas |
 | V1.0.1 | `Cargar_datos.ipynb` y `comprension_eda.ipynb` |
+| V1.0.2 | Correcciones del review del EDA (rango completo de `puntaje_datacredito`, etiquetas y conteos) |
 | V1.1.0 | Ingenieria de caracteristicas + primeros modelos |
 | V1.2.0+ | Monitoreo, Streamlit, API, Docker |
 
