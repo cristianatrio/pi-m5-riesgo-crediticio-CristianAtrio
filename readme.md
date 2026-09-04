@@ -4,7 +4,10 @@ Proyecto Integrador del Modulo 5 (Data Science, Henry). Modelo de machine learni
 que anticipa si un nuevo solicitante de credito pagara a tiempo, desplegado como API
 (FastAPI + Docker) con monitoreo de data drift y una app Streamlit.
 
-> Estado actual: **V1.0.0** - estructura de carpetas y ramas (punto de partida).
+> Estado actual: **V1.0.1** - carga de datos y EDA completos (`Cargar_datos.ipynb`, `comprension_eda.ipynb`).
+>
+> Hallazgos clave del EDA: target desbalanceado (4,75% de mora), `puntaje` excluida por fuga de informacion,
+> senales principales `puntaje_datacredito`, `huella_consulta`, `edad_cliente` y `plazo_meses`.
 
 ## Estructura del repositorio (no modificar: los pipelines de Jenkins dependen de ella)
 
