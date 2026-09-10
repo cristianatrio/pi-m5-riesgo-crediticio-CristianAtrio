@@ -32,3 +32,6 @@ mlops_pipeline/reports/tmp/
 .idea/
 .DS_Store
 Thumbs.db
+
+# --- Datos derivados del split (se regeneran con ft_engineering.py) ---
+mlops_pipeline/data/*.parquet
