@@ -19,9 +19,14 @@ Uso como modulo::
     X, y = separar_target(cargar_datos())
     prep = construir_preprocesador().fit(X_train, y_train)
 
-Uso como script (genera los artefactos del split y el preprocesador ajustado)::
+Uso como script (genera los splits transformados para inspeccion y tests)::
 
     python mlops_pipeline/src/ft_engineering.py
+
+El preprocesador ajustado NO se guarda por separado: el unico artefacto de inferencia
+es ``mlops_pipeline/models/modelo_riesgo.joblib`` (preprocesador + modelo en un solo
+Pipeline, generado por ``model_training_evaluation.py``). Asi no hay dos versiones
+que puedan divergir.
 """
 
 from __future__ import annotations
@@ -29,7 +34,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
 from feature_engine.encoding import OneHotEncoder, RareLabelEncoder
@@ -86,12 +90,31 @@ COLS_RATIOS = ["ratio_cuota_salario", "ratio_deuda_salario", "ratio_capital_sala
 COLS_LOG = COLS_WINSORIZAR + ["saldo_mora"] + COLS_RATIOS
 COLS_CATEGORICAS = ["tipo_credito", "tipo_laboral", "tendencia_ingresos"]
 
+# Contrato de entrada del pipeline (y de la API): columnas crudas que el modelo necesita.
+# No incluye puntaje ni fecha_prestamo (excluidas) ni el target.
+COLUMNAS_REQUERIDAS = [
+    "tipo_credito", "capital_prestado", "plazo_meses", "edad_cliente", "tipo_laboral",
+    "salario_cliente", "total_otros_prestamos", "cuota_pactada", "puntaje_datacredito",
+    "cant_creditosvigentes", "huella_consulta", "saldo_mora", "saldo_total", "saldo_principal",
+    "saldo_mora_codeudor", "creditos_sectorFinanciero", "creditos_sectorCooperativo",
+    "creditos_sectorReal", "promedio_ingresos_datacredito", "tendencia_ingresos",
+]
+
+
+def validar_esquema(X: pd.DataFrame, columnas: list[str] = COLUMNAS_REQUERIDAS) -> None:
+    """Falla con un mensaje operativo si faltan columnas, en vez de un KeyError generico."""
+    if not isinstance(X, pd.DataFrame):
+        raise TypeError(f"Se esperaba un pandas.DataFrame, llego {type(X).__name__}")
+    faltantes = [c for c in columnas if c not in X.columns]
+    if faltantes:
+        raise ValueError(f"Faltan columnas requeridas por el pipeline: {faltantes}")
+
 
 # ---------------------------------------------------------------------------
 # Transformadores propios
 # ---------------------------------------------------------------------------
 class LimpiezaCredito(BaseEstimator, TransformerMixin):
-    """Convierte valores imposibles en nulos y elimina las columnas excluidas.
+    """Valida el esquema, convierte valores imposibles en nulos y elimina las columnas excluidas.
 
     No aprende nada del train (stateless): las reglas salen del EDA y estan en
     config.json. Se deja dentro del pipeline para que la API reciba datos crudos.
@@ -103,6 +126,7 @@ class LimpiezaCredito(BaseEstimator, TransformerMixin):
         self.categorias_tendencia = categorias_tendencia
 
     def fit(self, X, y=None):
+        validar_esquema(X)
         self.columnas_excluidas_ = list(self.columnas_excluidas or CONFIG["features_excluidas"])
         self.rango_valido_ = dict(self.rango_valido or CONFIG["rango_valido"])
         self.categorias_tendencia_ = list(self.categorias_tendencia or CONFIG["categorias_tendencia"])
@@ -110,6 +134,7 @@ class LimpiezaCredito(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
+        validar_esquema(X)
         X = X.copy()
         X = X.drop(columns=[c for c in self.columnas_excluidas_ + [TARGET] if c in X.columns])
 
@@ -244,7 +269,6 @@ def dividir_train_test(X, y, test_size: float | None = None, random_state: int |
 # ---------------------------------------------------------------------------
 def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     df = cargar_datos()
     X, y = separar_target(df)
@@ -259,18 +283,15 @@ def main() -> None:
 
     descartadas = preprocesador.named_steps["drop_correlacionadas"].features_to_drop_
     print(f"Features de salida: {X_train_t.shape[1]} | descartadas por correlacion: {sorted(descartadas)}")
-    assert not X_train_t.isna().any().any(), "Quedaron nulos despues del pipeline"
+    if X_train_t.isna().any().any():
+        raise RuntimeError("Quedaron nulos despues del pipeline")
 
-    # Artefactos
+    # Splits transformados: solo para inspeccion y tests (ignorados por git, regenerables)
     X_train_t.to_parquet(DATA_DIR / "X_train.parquet")
     X_test_t.to_parquet(DATA_DIR / "X_test.parquet")
     y_train.to_frame().to_parquet(DATA_DIR / "y_train.parquet")
     y_test.to_frame().to_parquet(DATA_DIR / "y_test.parquet")
-    joblib.dump(preprocesador, MODELS_DIR / "preprocessor.joblib")
-    (MODELS_DIR / "feature_names.json").write_text(
-        json.dumps(list(X_train_t.columns), indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    print(f"Artefactos guardados en {DATA_DIR} y {MODELS_DIR}")
+    print(f"Splits transformados guardados en {DATA_DIR}")
     print(X_train_t.describe().T[["mean", "std", "min", "max"]].round(2).to_string())
 
 

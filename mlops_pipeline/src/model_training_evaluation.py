@@ -5,13 +5,22 @@ Flujo:
 1. Carga el dataset crudo y hace el split estratificado (ft_engineering).
 2. Para cada modelo arma ``Pipeline(preprocesador, clasificador)`` -> el fit del
    preprocesador ocurre dentro de cada fold, sin fuga de imputaciones ni percentiles.
-3. Validacion cruzada estratificada (5 folds) con ROC-AUC, PR-AUC, precision,
-   recall y F1 de la clase mora.
-4. Umbral de decision elegido con las probabilidades out-of-fold del train
-   (maximiza F1); el test queda intacto hasta la evaluacion final.
-5. Evaluacion en test, tabla comparativa, curvas ROC / PR, matrices de confusion.
-6. Seleccion del ganador (ROC-AUC en CV, desempate por PR-AUC) y serializacion del
-   pipeline completo en ``mlops_pipeline/models/modelo_riesgo.joblib``.
+3. Validacion cruzada estratificada (5 folds) con UN solo ajuste por fold: de las
+   probabilidades out-of-fold (OOF) salen ROC-AUC y PR-AUC por fold, el umbral de
+   decision (maximo F1 sobre el OOF completo) y precision / recall / F1 por fold a
+   ese mismo umbral. CV y test quedan bajo la misma regla de decision.
+   Limitacion conocida: el umbral se elige sobre el mismo OOF con el que se reporta
+   F1 en CV, lo que introduce un sesgo optimista leve. Una validacion anidada lo
+   eliminaria a costa de 5x tiempo; el test (nunca usado para elegir) es la
+   estimacion honesta.
+4. Evaluacion en test, tabla comparativa, curvas ROC / PR, matrices de confusion.
+5. Seleccion del ganador por ROC-AUC medio en CV (calidad del ranking, independiente
+   del umbral), desempate por PR-AUC y F1 en CV. El umbral es una decision operativa
+   posterior, no un criterio de seleccion.
+6. Importancia por permutacion sobre test: analisis post-hoc para explicar el modelo
+   elegido, no evidencia adicional de performance.
+7. Serializacion del pipeline completo (preprocesador + modelo) en
+   ``mlops_pipeline/models/modelo_riesgo.joblib``; es el unico artefacto de inferencia.
 
 Uso::
 
@@ -48,7 +57,8 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_validate
+from sklearn.base import clone
+from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
@@ -67,13 +77,7 @@ from ft_engineering import (  # noqa: E402
 REPORTS_DIR = RAIZ / "mlops_pipeline" / "reports"
 FIG_DIR = REPORTS_DIR / "figures"
 CV_FOLDS = CONFIG["cv_folds"]
-SCORING = {
-    "roc_auc": "roc_auc",
-    "pr_auc": "average_precision",
-    "precision": "precision",
-    "recall": "recall",
-    "f1": "f1",
-}
+METRICAS = ["roc_auc", "pr_auc", "precision", "recall", "f1"]
 sns.set_theme(style="whitegrid")
 
 
@@ -118,34 +122,50 @@ def umbral_optimo_f1(y_true, proba) -> float:
     return float(umbrales[int(np.argmax(f1))])
 
 
-def metricas_en_test(y_true, proba, umbral: float) -> dict[str, float]:
+def calcular_metricas(y_true, proba, umbral: float) -> dict[str, float]:
+    """Metricas de ranking (independientes del umbral) y de decision (al umbral dado)."""
     pred = (proba >= umbral).astype(int)
     return {
-        "test_roc_auc": roc_auc_score(y_true, proba),
-        "test_pr_auc": average_precision_score(y_true, proba),
-        "test_precision": precision_score(y_true, pred, zero_division=0),
-        "test_recall": recall_score(y_true, pred, zero_division=0),
-        "test_f1": f1_score(y_true, pred, zero_division=0),
+        "roc_auc": roc_auc_score(y_true, proba),
+        "pr_auc": average_precision_score(y_true, proba),
+        "precision": precision_score(y_true, pred, zero_division=0),
+        "recall": recall_score(y_true, pred, zero_division=0),
+        "f1": f1_score(y_true, pred, zero_division=0),
     }
 
 
+def probabilidades_oof(pipe: Pipeline, X, y, cv) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Un ajuste por fold. Devuelve las probabilidades out-of-fold y los indices de cada fold."""
+    proba = np.zeros(len(y), dtype=float)
+    folds = []
+    for idx_train, idx_val in cv.split(X, y):
+        modelo_fold = clone(pipe).fit(X.iloc[idx_train], y.iloc[idx_train])
+        proba[idx_val] = modelo_fold.predict_proba(X.iloc[idx_val])[:, 1]
+        folds.append(idx_val)
+    return proba, folds
+
+
 def evaluar_modelo(nombre, clasificador, X_train, y_train, X_test, y_test, cv):
-    """CV + umbral OOF + ajuste final + metricas en test. Devuelve (fila, pipeline, proba_test)."""
+    """CV (un fit por fold) + umbral OOF + ajuste final + test. Devuelve (fila, pipeline, proba_test)."""
     pipe = Pipeline([("preprocesador", construir_preprocesador()), ("modelo", clasificador)])
     t0 = time.perf_counter()
 
-    cv_res = cross_validate(pipe, X_train, y_train, cv=cv, scoring=SCORING, n_jobs=1)
-    proba_oof = cross_val_predict(pipe, X_train, y_train, cv=cv, method="predict_proba", n_jobs=1)[:, 1]
-    umbral = umbral_optimo_f1(y_train, proba_oof) if nombre.startswith("Dummy") is False else 0.5
+    proba_oof, folds = probabilidades_oof(pipe, X_train, y_train, cv)
+    es_dummy = nombre.startswith("Dummy")
+    umbral = 0.5 if es_dummy else umbral_optimo_f1(y_train, proba_oof)
+
+    # Metricas por fold, todas al mismo umbral que se usara en test
+    y_arr = y_train.to_numpy()
+    por_fold = pd.DataFrame([calcular_metricas(y_arr[idx], proba_oof[idx], umbral) for idx in folds])
 
     pipe.fit(X_train, y_train)
     proba_test = pipe.predict_proba(X_test)[:, 1]
 
     fila = {"modelo": nombre, "umbral": round(umbral, 4)}
-    for k in SCORING:
-        fila[f"cv_{k}_mean"] = cv_res[f"test_{k}"].mean()
-        fila[f"cv_{k}_std"] = cv_res[f"test_{k}"].std()
-    fila.update(metricas_en_test(y_test, proba_test, umbral))
+    for k in METRICAS:
+        fila[f"cv_{k}_mean"] = por_fold[k].mean()
+        fila[f"cv_{k}_std"] = por_fold[k].std(ddof=0)
+    fila.update({f"test_{k}": v for k, v in calcular_metricas(y_test, proba_test, umbral).items()})
     fila["segundos"] = round(time.perf_counter() - t0, 1)
     print(f"  {nombre:<22} CV ROC-AUC {fila['cv_roc_auc_mean']:.3f}+-{fila['cv_roc_auc_std']:.3f} | "
           f"CV PR-AUC {fila['cv_pr_auc_mean']:.3f} | test ROC-AUC {fila['test_roc_auc']:.3f} | "
@@ -154,12 +174,15 @@ def evaluar_modelo(nombre, clasificador, X_train, y_train, X_test, y_test, cv):
 
 
 def seleccionar_ganador(tabla: pd.DataFrame) -> str:
-    """ROC-AUC en CV como criterio principal (ranking robusto con desbalance), PR-AUC desempata.
+    """Criterio: ROC-AUC medio en CV (calidad del ranking, no depende del umbral);
+    desempate por PR-AUC (sensible al desbalance) y luego F1 en CV al umbral operativo.
 
-    El accuracy no participa: el Dummy tendria 95% y seria inutil.
+    El accuracy no participa: el Dummy tendria 95% y seria inutil. El umbral se decide
+    despues, como parametro operativo del modelo ya elegido.
     """
     candidatos = tabla[~tabla["modelo"].str.startswith("Dummy")]
-    return candidatos.sort_values(["cv_roc_auc_mean", "cv_pr_auc_mean"], ascending=False).iloc[0]["modelo"]
+    orden = ["cv_roc_auc_mean", "cv_pr_auc_mean", "cv_f1_mean"]
+    return candidatos.sort_values(orden, ascending=False).iloc[0]["modelo"]
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +194,7 @@ def graficar_comparacion(tabla: pd.DataFrame) -> None:
     largo["metrica"] = largo["metrica"].str.replace("cv_", "").str.replace("_mean", "").str.upper()
     fig, ax = plt.subplots(figsize=(12, 5))
     sns.barplot(data=largo, x="metrica", y="valor", hue="modelo", ax=ax)
-    ax.set_title(f"Comparacion de modelos: media en validacion cruzada ({CV_FOLDS} folds, clase mora)")
+    ax.set_title(f"Comparacion de modelos: media en CV ({CV_FOLDS} folds, clase mora, umbral optimizado por modelo)")
     ax.set_ylim(0, 1)
     ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
@@ -216,7 +239,10 @@ def graficar_matrices(y_test, probas: dict[str, np.ndarray], umbrales: dict[str,
 
 
 def importancia_variables(pipe: Pipeline, X_test, y_test) -> pd.DataFrame:
-    """Importancia por permutacion sobre las features ya transformadas (agnostica al modelo)."""
+    """Importancia por permutacion sobre las features ya transformadas (agnostica al modelo).
+
+    Analisis post-hoc sobre test para explicar el ganador; no interviene en la seleccion.
+    """
     X_t = pipe.named_steps["preprocesador"].transform(X_test)
     res = permutation_importance(
         pipe.named_steps["modelo"], X_t, y_test, scoring="roc_auc", n_repeats=10,
@@ -267,21 +293,25 @@ def main() -> None:
 
     pred_g = (probas[ganador] >= umbrales[ganador]).astype(int)
     cm = confusion_matrix(y_test, pred_g)
+    features_modelo = list(pipe_g.named_steps["preprocesador"].transform(X_test.head(1)).columns)
     metricas = {
         "modelo_ganador": ganador,
-        "criterio_seleccion": "mayor ROC-AUC medio en CV; desempate por PR-AUC. Accuracy excluido por desbalance.",
+        "criterio_seleccion": "mayor ROC-AUC medio en CV; desempate por PR-AUC y F1 en CV. Accuracy excluido por desbalance.",
         "umbral_decision": float(umbrales[ganador]),
-        "cv": {k: {"mean": float(fila_g[f"cv_{k}_mean"]), "std": float(fila_g[f"cv_{k}_std"])} for k in SCORING},
-        "test": {k: float(fila_g[k]) for k in tabla.columns if k.startswith("test_")},
+        "nota_umbral": "Elegido maximizando F1 sobre probabilidades out-of-fold del train; CV y test se reportan a este umbral.",
+        "cv": {k: {"mean": float(fila_g[f"cv_{k}_mean"]), "std": float(fila_g[f"cv_{k}_std"])} for k in METRICAS},
+        "test": {k: float(fila_g[f"test_{k}"]) for k in METRICAS},
         "matriz_confusion_test": {"tn": int(cm[0, 0]), "fp": int(cm[0, 1]), "fn": int(cm[1, 0]), "tp": int(cm[1, 1])},
         "top_features": imp.head(10)["feature"].tolist(),
+        "nota_importancia": "Permutacion sobre test, analisis post-hoc; no participa de la seleccion.",
         "n_train": int(len(y_train)),
         "n_test": int(len(y_test)),
         "tasa_mora_train": float(y_train.mean()),
-        "features_modelo": list(pipe_g.named_steps["preprocesador"].transform(X_test.head(1)).columns),
+        "features_modelo": features_modelo,
         "random_state": RANDOM_STATE,
     }
     (REPORTS_DIR / "metrics.json").write_text(json.dumps(metricas, indent=2, ensure_ascii=False), encoding="utf-8")
+    (MODELS_DIR / "feature_names.json").write_text(json.dumps(features_modelo, indent=2, ensure_ascii=False), encoding="utf-8")
     joblib.dump(pipe_g, MODELS_DIR / "modelo_riesgo.joblib")
 
     print("\n=== Tabla comparativa ===")

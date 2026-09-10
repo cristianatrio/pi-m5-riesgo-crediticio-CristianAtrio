@@ -1,26 +1,35 @@
-# Base entregada por Henry
-pandas
-numpy
-openpyxl
-python-dotenv
-db-dtypes
-jupyter
-notebook
-ipykernel
-seaborn
-ipywidgets
-scikit-learn
-xgboost
-pydantic
-fastapi
-uvicorn[standard]
-# Agregadas para este proyecto
-matplotlib
-scipy
-feature-engine
-joblib
-streamlit
-requests
-pytest
-pytest-cov
-httpx
+# Entorno reproducible: Python 3.12 (ver set_up.bat). Versiones fijadas con las que se
+# ejecuto y valido el proyecto. Para regenerar el freeze completo: pip freeze > requirements.lock
+#
+# LightGBM esta excluido a proposito: lightgbm 4.7 + numpy 2.5 crashea en Windows
+# (access violation en LGBM_DatasetSetField). HistGradientBoosting cubre el mismo enfoque.
+
+# --- Base entregada por Henry ---
+pandas==3.0.5
+numpy==2.5.2
+openpyxl==3.1.5
+python-dotenv==1.2.3
+db-dtypes==1.7.1
+jupyter==1.1.1
+notebook==7.6.2
+ipykernel==7.3.0
+seaborn==0.13.2
+ipywidgets==8.1.9
+scikit-learn==1.9.0
+xgboost==3.4.1
+pydantic==2.13.5
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+
+# --- Agregadas para este proyecto ---
+matplotlib==3.11.1
+scipy==1.18.1
+feature-engine==1.9.4
+joblib==1.6.0
+pyarrow==25.0.1
+nbconvert==7.17.1
+streamlit==1.63.0
+requests==2.34.2
+pytest==9.1.1
+pytest-cov==7.1.0
+httpx==0.28.1

@@ -20,7 +20,7 @@ mlops_pipeline/
 │   ├── model_deploy.py
 │   ├── model_monitoring.py
 │   └── config.json            # parametros del proyecto (target, exclusiones, rangos, seed)
-├── models/                    # preprocessor.joblib, modelo_riesgo.joblib, feature_names.json
+├── models/                    # modelo_riesgo.joblib (preprocesador + modelo), feature_names.json
 ├── reports/                   # metrics.json, comparacion_modelos.csv, importancia_variables.csv
 │   └── figures/               # curvas ROC/PR, matrices de confusion, comparacion, importancias
 └── data/                      # splits transformados (parquet, ignorados por git)
@@ -61,6 +61,9 @@ pim5_riesgo_crediticio-venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+`requirements.txt` fija versiones exactas (Python 3.12). Si se actualiza una dependencia, correr los dos scripts del
+Avance 2 y verificar que `mlops_pipeline/reports/metrics.json` no cambie.
+
 ## Avance 1 - EDA (resumen)
 
 - 10.763 creditos, 23 variables, target `Pago_atiempo` (1 = pago a tiempo). Se modela **mora = 1 - Pago_atiempo**.
@@ -88,8 +91,9 @@ pip install -r requirements.txt
 | Multicolinealidad | `DropCorrelatedFeatures(0.9)` | descarta 6 redundantes (saldo_total, creditos_total_sectores, dummies complementarias, etc.) |
 | Escalado | `StandardScaler` | todas (necesario para la regresion logistica) |
 
-Salida: 32 features. Todo el preprocesador se ajusta solo con train y viaja dentro del pipeline del modelo,
-asi la API recibe datos crudos.
+Salida: 32 features. El preprocesador viaja dentro del pipeline del modelo (unico artefacto de inferencia:
+`modelo_riesgo.joblib`), asi la API recibe datos crudos y no hay dos versiones que puedan divergir.
+`LimpiezaCredito` valida el esquema de entrada (`COLUMNAS_REQUERIDAS`) y falla con un mensaje operativo si falta una columna.
 
 ```bash
 python mlops_pipeline/src/ft_engineering.py
@@ -97,11 +101,18 @@ python mlops_pipeline/src/ft_engineering.py
 
 ### `model_training_evaluation.py`
 
-- Split estratificado 80/20 (`random_state=42`), `StratifiedKFold(5)`.
+- Split estratificado 80/20 (`random_state=42`), `StratifiedKFold(5)`, un solo ajuste por fold.
 - El preprocesador se ajusta dentro de cada fold (`Pipeline(preprocesador, modelo)`): sin fuga de imputaciones.
-- Umbral de decision elegido con probabilidades out-of-fold del train (maximo F1); el test se usa una sola vez.
+- Umbral de decision elegido con probabilidades out-of-fold del train (maximo F1). CV y test se reportan al mismo umbral.
+  Limitacion: el umbral se elige sobre el mismo OOF con el que se reporta F1 en CV (sesgo optimista leve); el test, que
+  nunca interviene en la eleccion, es la estimacion honesta.
+- Seleccion por ROC-AUC en CV (calidad del ranking), desempate por PR-AUC y F1. El umbral es una decision operativa posterior.
+- Importancia por permutacion sobre test: analisis post-hoc del ganador, no evidencia adicional de performance.
 - Modelos: Dummy (piso), Regresion Logistica, Random Forest, HistGradientBoosting, XGBoost. Todos con compensacion del desbalance.
-- LightGBM se descarto: la version 4.7 falla con numpy 2.5 en Windows y HistGradientBoosting cubre el mismo enfoque.
+- LightGBM se descarto: la version 4.7 falla con numpy 2.5 en Windows (access violation). HistGradientBoosting es el
+  gradient boosting con histogramas nativo de sklearn, mismo enfoque pero sin GOSS, sin soporte nativo de categoricas
+  en este pipeline (ya van one-hot) y con menos hiperparametros. `requirements.txt` fija versiones para que la
+  combinacion incompatible no vuelva a instalarse.
 
 ```bash
 python mlops_pipeline/src/model_training_evaluation.py
@@ -109,18 +120,18 @@ python mlops_pipeline/src/model_training_evaluation.py
 
 ### Resultados
 
-Metricas de CV a umbral 0,5; metricas de test al umbral optimizado. Clase positiva = mora.
+CV y test al umbral optimizado de cada modelo. Clase positiva = mora.
 
-| Modelo | CV ROC-AUC | CV PR-AUC | Test ROC-AUC | Test PR-AUC | Test recall | Test precision | Test F1 | Umbral |
-|---|---|---|---|---|---|---|---|---|
-| Dummy (siempre paga) | 0,500 | 0,048 | 0,500 | 0,047 | 0,00 | 0,00 | 0,00 | 0,50 |
-| Regresion Logistica | 0,675 +- 0,043 | 0,146 | 0,687 | 0,161 | 0,26 | 0,19 | 0,22 | 0,69 |
-| **Random Forest** | **0,678 +- 0,048** | 0,139 | **0,699** | 0,143 | 0,31 | 0,18 | **0,23** | 0,50 |
-| HistGradientBoosting | 0,641 +- 0,037 | 0,126 | 0,699 | 0,167 | 0,32 | 0,15 | 0,21 | 0,56 |
-| XGBoost | 0,657 +- 0,034 | 0,132 | 0,689 | 0,149 | 0,31 | 0,13 | 0,18 | 0,53 |
+| Modelo | CV ROC-AUC | CV PR-AUC | CV F1 | Test ROC-AUC | Test PR-AUC | Test recall | Test precision | Test F1 | Umbral |
+|---|---|---|---|---|---|---|---|---|---|
+| Dummy (siempre paga) | 0,500 | 0,048 | 0,00 | 0,500 | 0,047 | 0,00 | 0,00 | 0,00 | 0,50 |
+| Regresion Logistica | 0,675 +- 0,043 | 0,146 | 0,19 | 0,687 | 0,161 | 0,26 | 0,19 | 0,22 | 0,69 |
+| **Random Forest** | **0,678 +- 0,048** | 0,139 | 0,19 | **0,699** | 0,143 | 0,31 | 0,18 | **0,23** | 0,50 |
+| HistGradientBoosting | 0,641 +- 0,037 | 0,126 | 0,18 | 0,699 | 0,167 | 0,32 | 0,15 | 0,21 | 0,56 |
+| XGBoost | 0,657 +- 0,034 | 0,132 | 0,17 | 0,689 | 0,149 | 0,31 | 0,13 | 0,18 | 0,53 |
 
 **Modelo elegido: Random Forest.** Criterio: mayor ROC-AUC medio en validacion cruzada (ranking robusto con
-desbalance), desempate por PR-AUC. No se usa accuracy porque el Dummy tendria 95%. Los cuatro modelos estan
+desbalance), desempate por PR-AUC y F1 en CV. No se usa accuracy porque el Dummy tendria 95%. Los cuatro modelos estan
 dentro del margen de error entre si (std ~0,04); se prefiere Random Forest por ser el mas estable entre CV y
 test, tener el mejor F1 en test y un umbral natural (0,50). La regresion logistica queda como alternativa
 interpretable a un punto de distancia.
@@ -128,7 +139,7 @@ interpretable a un punto de distancia.
 Matriz de confusion en test (umbral 0,50): TN 1.907 | FP 144 | FN 70 | TP 32. El modelo detecta 31% de las
 moras marcando el 8% de los solicitantes; el PR-AUC de 0,14 triplica el azar (0,047).
 
-Variables mas influyentes (importancia por permutacion): `puntaje_datacredito`, `huella_consulta`,
+Variables mas influyentes (importancia por permutacion sobre test, analisis post-hoc): `puntaje_datacredito`, `huella_consulta`,
 `promedio_ingresos_datacredito`, `plazo_meses`, `edad_cliente`, `total_otros_prestamos`, `ratio_deuda_salario`.
 Coinciden con el bivariable del EDA.
 

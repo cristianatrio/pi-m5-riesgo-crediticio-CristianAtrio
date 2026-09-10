@@ -1,7 +1,8 @@
 {
   "modelo_ganador": "Random Forest",
-  "criterio_seleccion": "mayor ROC-AUC medio en CV; desempate por PR-AUC. Accuracy excluido por desbalance.",
+  "criterio_seleccion": "mayor ROC-AUC medio en CV; desempate por PR-AUC y F1 en CV. Accuracy excluido por desbalance.",
   "umbral_decision": 0.4962,
+  "nota_umbral": "Elegido maximizando F1 sobre probabilidades out-of-fold del train; CV y test se reportan a este umbral.",
   "cv": {
     "roc_auc": {
       "mean": 0.678274216688518,
@@ -12,24 +13,24 @@
       "std": 0.02780914166407767
     },
     "precision": {
-      "mean": 0.15884366642093756,
-      "std": 0.040701076265661565
+      "mean": 0.15954273402543712,
+      "std": 0.04553896725850483
     },
     "recall": {
-      "mean": 0.21755495332731103,
-      "std": 0.029931561656330537
+      "mean": 0.22731105088828665,
+      "std": 0.03543057755244224
     },
     "f1": {
-      "mean": 0.18256962715894837,
-      "std": 0.0361976195882681
+      "mean": 0.18651696713538152,
+      "std": 0.041942640630334926
     }
   },
   "test": {
-    "test_roc_auc": 0.6994770604487528,
-    "test_pr_auc": 0.1431233302929074,
-    "test_precision": 0.18181818181818182,
-    "test_recall": 0.3137254901960784,
-    "test_f1": 0.2302158273381295
+    "roc_auc": 0.6994770604487528,
+    "pr_auc": 0.1431233302929074,
+    "precision": 0.18181818181818182,
+    "recall": 0.3137254901960784,
+    "f1": 0.2302158273381295
   },
   "matriz_confusion_test": {
     "tn": 1907,
@@ -49,6 +50,7 @@
     "plazo_largo",
     "cant_creditosvigentes"
   ],
+  "nota_importancia": "Permutacion sobre test, analisis post-hoc; no participa de la seleccion.",
   "n_train": 8610,
   "n_test": 2153,
   "tasa_mora_train": 0.04750290360046457,
