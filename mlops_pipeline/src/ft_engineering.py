@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -101,7 +102,7 @@ COLUMNAS_REQUERIDAS = [
 ]
 
 
-def validar_esquema(X: pd.DataFrame, columnas: list[str] = COLUMNAS_REQUERIDAS) -> None:
+def validar_esquema(X: pd.DataFrame, columnas: Sequence[str] = COLUMNAS_REQUERIDAS) -> None:
     """Falla con un mensaje operativo si faltan columnas, en vez de un KeyError generico."""
     if not isinstance(X, pd.DataFrame):
         raise TypeError(f"Se esperaba un pandas.DataFrame, llego {type(X).__name__}")
@@ -157,7 +158,8 @@ class LimpiezaCredito(BaseEstimator, TransformerMixin):
         return X
 
     def get_feature_names_out(self, input_features=None):
-        return np.asarray([c for c in self.feature_names_in_ if c not in self.columnas_excluidas_ + [TARGET]])
+        features = self.feature_names_in_ if input_features is None else np.asarray(input_features)
+        return np.asarray([c for c in features if c not in self.columnas_excluidas_ + [TARGET]])
 
 
 class FeaturesCredito(BaseEstimator, TransformerMixin):
@@ -194,7 +196,8 @@ class FeaturesCredito(BaseEstimator, TransformerMixin):
             "ratio_cuota_salario", "ratio_deuda_salario", "ratio_capital_salario", "plazo_largo",
             "tiene_mora_previa", "sin_historial_financiero", "creditos_total_sectores",
         ]
-        return np.asarray(list(self.feature_names_in_) + nuevas)
+        features = self.feature_names_in_ if input_features is None else np.asarray(input_features)
+        return np.asarray(list(features) + nuevas)
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +252,8 @@ def cargar_datos(ruta: Path | str | None = None) -> pd.DataFrame:
 
 def separar_target(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     """Devuelve X (crudo, sin el target) e y = mora (1 = no pago a tiempo)."""
+    if TARGET not in df.columns:
+        raise ValueError(f"No se encontro la columna target requerida: {TARGET}")
     y = (1 - df[TARGET]).rename("mora").astype(int)
     X = df.drop(columns=[TARGET])
     return X, y
@@ -258,7 +263,7 @@ def dividir_train_test(X, y, test_size: float | None = None, random_state: int |
     """Split estratificado: con 4,75% de positivos hay que preservar la proporcion."""
     return train_test_split(
         X, y,
-        test_size=test_size or CONFIG["test_size"],
+        test_size=CONFIG["test_size"] if test_size is None else test_size,
         random_state=random_state if random_state is not None else RANDOM_STATE,
         stratify=y,
     )

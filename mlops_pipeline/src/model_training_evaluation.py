@@ -118,12 +118,16 @@ def definir_modelos(ratio_desbalance: float) -> dict[str, object]:
 def umbral_optimo_f1(y_true, proba) -> float:
     """Umbral que maximiza F1 de la clase mora sobre probabilidades out-of-fold."""
     precision, recall, umbrales = precision_recall_curve(y_true, proba)
+    if umbrales.size == 0:
+        raise ValueError("No se pudo calcular un umbral: las probabilidades no tienen variacion.")
     f1 = 2 * precision[:-1] * recall[:-1] / np.clip(precision[:-1] + recall[:-1], 1e-9, None)
     return float(umbrales[int(np.argmax(f1))])
 
 
 def calcular_metricas(y_true, proba, umbral: float) -> dict[str, float]:
     """Metricas de ranking (independientes del umbral) y de decision (al umbral dado)."""
+    if len(y_true) != len(proba):
+        raise ValueError("y_true y proba deben tener la misma cantidad de observaciones.")
     pred = (proba >= umbral).astype(int)
     return {
         "roc_auc": roc_auc_score(y_true, proba),
@@ -142,6 +146,8 @@ def probabilidades_oof(pipe: Pipeline, X, y, cv) -> tuple[np.ndarray, list[np.nd
         modelo_fold = clone(pipe).fit(X.iloc[idx_train], y.iloc[idx_train])
         proba[idx_val] = modelo_fold.predict_proba(X.iloc[idx_val])[:, 1]
         folds.append(idx_val)
+    if not np.isfinite(proba).all():
+        raise RuntimeError("La validacion OOF produjo probabilidades no finitas.")
     return proba, folds
 
 
