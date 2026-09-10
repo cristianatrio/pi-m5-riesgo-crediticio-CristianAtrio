@@ -18,7 +18,6 @@ uvicorn[standard]
 matplotlib
 scipy
 feature-engine
-lightgbm
 joblib
 streamlit
 requests
