@@ -1,0 +1,49 @@
+name: CI - validacion del pipeline
+
+on:
+  push:
+    branches: [developer, certification, master]
+  pull_request:
+    branches: [certification, master]
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Compilar scripts
+        run: python -m py_compile mlops_pipeline/src/*.py
+
+      - name: Ingenieria de caracteristicas
+        run: python mlops_pipeline/src/ft_engineering.py
+
+      - name: Monitoreo de drift (temporal + sintetico, autotest del detector)
+        run: python mlops_pipeline/src/model_monitoring.py --escenario ambos
+
+      - name: Smoke test del modelo serializado
+        run: |
+          python - <<'EOF'
+          import sys, json, joblib, pandas as pd
+          sys.path.insert(0, "mlops_pipeline/src")
+          from ft_engineering import COLUMNAS_REQUERIDAS, cargar_datos
+          modelo = joblib.load("mlops_pipeline/models/modelo_riesgo.joblib")
+          proba = modelo.predict_proba(cargar_datos().head(50)[COLUMNAS_REQUERIDAS])[:, 1]
+          assert proba.shape == (50,) and (0 <= proba).all() and (proba <= 1).all()
+          umbral = json.load(open("mlops_pipeline/reports/metrics.json"))["umbral_decision"]
+          print(f"OK: 50 predicciones, media {proba.mean():.3f}, umbral {umbral}")
+          EOF
+
+      - name: Publicar reportes de drift
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-drift
+          path: mlops_pipeline/reports/drift/

@@ -7,15 +7,37 @@
   "random_state": 42,
   "test_size": 0.2,
   "cv_folds": 5,
-  "features_excluidas": ["puntaje", "fecha_prestamo"],
+  "features_excluidas": [
+    "puntaje",
+    "fecha_prestamo"
+  ],
   "motivo_exclusion": {
     "puntaje": "Fuga de informacion: separa perfectamente las clases (ver comprension_eda.ipynb, seccion 3.8)",
     "fecha_prestamo": "No generaliza a creditos futuros; se reserva para el split temporal del monitoreo"
   },
   "rango_valido": {
-    "edad_cliente": [18, 99],
-    "puntaje_datacredito": [150, 950]
+    "edad_cliente": [
+      18,
+      99
+    ],
+    "puntaje_datacredito": [
+      150,
+      950
+    ]
   },
-  "categorias_tendencia": ["Creciente", "Estable", "Decreciente"],
-  "umbral_default": 0.5
+  "categorias_tendencia": [
+    "Creciente",
+    "Estable",
+    "Decreciente"
+  ],
+  "umbral_default": 0.5,
+  "drift": {
+    "psi_alerta": 0.1,
+    "psi_critico": 0.25,
+    "alpha": 0.05,
+    "n_bins": 10,
+    "max_alertas": 3,
+    "fecha_corte_simulacion": "2025-10-01",
+    "nota": "PSI < 0.1 sin cambio; 0.1-0.25 cambio moderado (alerta); > 0.25 cambio fuerte (critico). Alerta global si >= 1 critico o >= max_alertas alertas."
+  }
 }
