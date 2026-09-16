@@ -32,6 +32,7 @@ que puedan divergir.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Sequence
 
@@ -60,11 +61,14 @@ CONFIG = json.loads((SRC_DIR / "config.json").read_text(encoding="utf-8"))
 
 
 def buscar_raiz(nombre: str = "Base_de_datos.csv") -> Path:
-    """Sube por el arbol de carpetas hasta encontrar el dataset (raiz del repo)."""
+    """Raiz del repo: variable RAIZ_PROYECTO, o la carpeta que contiene el dataset, o
+    <raiz>/mlops_pipeline/src -> <raiz> (contenedor de la API, sin dataset)."""
+    if os.environ.get("RAIZ_PROYECTO"):
+        return Path(os.environ["RAIZ_PROYECTO"]).resolve()
     for carpeta in [SRC_DIR, *SRC_DIR.parents]:
         if (carpeta / nombre).exists():
             return carpeta
-    raise FileNotFoundError(f"No se encontro {nombre} subiendo desde {SRC_DIR}")
+    return SRC_DIR.parents[1]
 
 
 RAIZ = buscar_raiz(CONFIG["dataset_path"])
