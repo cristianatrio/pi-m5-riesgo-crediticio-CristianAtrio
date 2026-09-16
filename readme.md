@@ -301,8 +301,18 @@ docker logs riesgo-api
 docker stop riesgo-api && docker rm riesgo-api
 ```
 
-El job `docker` del CI construye la imagen en cada push, levanta el contenedor, espera el `/health` y ejecuta un
-`/predict` real. Es la evidencia de que la imagen buildea y la API responde en un entorno limpio.
+Resultado local (Docker Desktop 29.7, backend WSL 2):
+
+```
+Imagen: riesgo-api:1.3.0 | 831MB
+riesgo-api | Up 6 seconds (healthy) | 0.0.0.0:8000->8000/tcp
+$ docker exec riesgo-api whoami        -> api
+$ curl http://localhost:8000/health    -> {"status":"ok","modelo":"Random Forest","version_api":"1.3.0","umbral":0.4962}
+$ curl -X POST .../predict (ejemplo)   -> {"probabilidad_mora":0.2942,"clase":0,"nivel":"bajo","decision":"aprobar","umbral":0.4962}
+```
+
+El job `docker` del CI repite lo mismo en cada push: construye la imagen, levanta el contenedor, espera el `/health`
+y ejecuta un `/predict` real. Es la evidencia de que la imagen buildea y la API responde en un entorno limpio.
 
 ### Despliegue
 
