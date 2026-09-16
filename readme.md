@@ -19,8 +19,8 @@ Resultado: el modelo detecta el 31% de las moras marcando el 8% de las solicitud
 triplica el azar. Las variables que mas pesan son el score de la central, las consultas recientes, el plazo
 y la edad. Un score interno (`puntaje`) fue descartado por contener el resultado.
 
-> Estado actual: **V1.2.0** - monitoreo de data drift (`model_monitoring.py`), app Streamlit
-> (`app_streamlit.py`) y CI en GitHub Actions. Modelo en produccion: **Random Forest**, ROC-AUC 0,70 en test.
+> Estado actual: **V1.3.0** - API REST con FastAPI (`model_deploy.py`), imagen Docker y pruebas
+> automatizadas. Los 4 avances completos. Modelo en produccion: **Random Forest**, ROC-AUC 0,70 en test.
 
 ## Estructura del repositorio (no modificar: los pipelines de Jenkins dependen de ella)
 
@@ -33,6 +33,7 @@ mlops_pipeline/
 │   ├── model_training_evaluation.py
 │   ├── model_deploy.py
 │   ├── model_monitoring.py
+│   ├── model_deploy.py        # API FastAPI: /health, /model/info, /predict, /predict/batch
 │   ├── app_streamlit.py       # app de prediccion, explicacion, lote y monitoreo
 │   └── config.json            # parametros del proyecto (target, exclusiones, rangos, seed, umbrales de drift)
 ├── models/                    # modelo_riesgo.joblib (preprocesador + modelo), feature_names.json
@@ -40,9 +41,13 @@ mlops_pipeline/
 │   ├── figures/               # curvas ROC/PR, matrices de confusion, comparacion, importancias
 │   └── drift/                 # reportes de drift (json, md, csv) y figuras PSI por escenario
 └── data/                      # splits transformados (parquet, ignorados por git)
-.github/workflows/ci.yml       # CI: compila, corre feature engineering, monitoreo y smoke test del modelo
+.github/workflows/ci.yml       # CI: compila, feature engineering, monitoreo, pytest, build y prueba de la imagen Docker
+tests/test_api.py              # pruebas de la API y del contrato del pipeline (pytest)
+Dockerfile                     # imagen de la API (python:3.12-slim, usuario no root, healthcheck)
+.dockerignore
+requirements-api.txt           # dependencias minimas de la imagen
 Base_de_datos.csv
-requirements.txt
+requirements.txt               # dependencias completas de desarrollo y CI
 set_up.bat                     # crea el venv, instala requirements y registra el kernel
 .gitignore
 readme.md
@@ -63,7 +68,7 @@ readme.md
 | V1.0.2 | Correcciones del review del EDA (rango completo de `puntaje_datacredito`, etiquetas y conteos) |
 | V1.1.0 | Ingenieria de caracteristicas + entrenamiento, evaluacion y seleccion de modelos |
 | V1.2.0 | Monitoreo de data drift, app Streamlit, CI con GitHub Actions |
-| V1.3.0+ | API FastAPI, Docker, SonarCloud |
+| V1.3.0 | API FastAPI, Dockerfile, pruebas con pytest, CI con build de la imagen |
 
 ## Setup local
 
@@ -215,3 +220,93 @@ En cada push a `developer` / `certification` / `master` y en cada PR: instala `r
 compila los scripts, corre `ft_engineering.py`, corre el monitoreo en ambos escenarios (falla si el detector no
 marca el drift sintetico), hace un smoke test del modelo serializado y publica los reportes de drift como
 artefacto. Es la validacion automatica previa al merge; el despliegue (Docker) se agrega en el Avance 4.
+
+## Avance 4 - Despliegue: API FastAPI y Docker
+
+### `model_deploy.py`
+
+| Metodo | Ruta | Que hace |
+|---|---|---|
+| GET | `/health` | Estado del servicio y del modelo (lo usa el `HEALTHCHECK` de Docker y el CI) |
+| GET | `/model/info` | Modelo, umbral, metricas de CV y test, columnas requeridas, features, top features |
+| POST | `/predict` | Un solicitante -> `probabilidad_mora`, `clase`, `nivel`, `decision`, `umbral` |
+| POST | `/predict/batch` | Hasta 1.000 solicitantes -> predicciones + resumen |
+| GET | `/docs` | Swagger UI con el ejemplo cargado |
+
+- Entrada validada con Pydantic (`Solicitante`): 20 campos con los mismos nombres que `Base_de_datos.csv`, rangos,
+  `tipo_laboral` y `tendencia_ingresos` como literales, `extra="forbid"` (un campo desconocido devuelve 422).
+  `puntaje_datacredito`, saldos, `promedio_ingresos_datacredito` y `tendencia_ingresos` aceptan `null`: el pipeline imputa.
+- El modelo y el umbral se cargan una vez en el `lifespan`. Si faltan artefactos la API responde 503.
+- Errores: 422 (validacion), 400 (esquema rechazado por el pipeline), 500 (fallo de inferencia, sin traza al cliente).
+- La API no duplica reglas de limpieza: manda datos crudos al pipeline serializado (`modelo_riesgo.joblib`).
+
+```bash
+python -m uvicorn model_deploy:app --app-dir mlops_pipeline/src --reload --port 8000
+```
+
+### Prueba del endpoint (resultado real)
+
+```bash
+curl http://localhost:8000/health
+```
+```json
+{"status":"ok","modelo":"Random Forest","version_api":"1.3.0","umbral":0.4962}
+```
+
+```bash
+curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d '{"tipo_credito":4,"capital_prestado":1921920,"plazo_meses":10,"edad_cliente":42,"tipo_laboral":"Empleado","salario_cliente":3000000,"total_otros_prestamos":1000000,"cuota_pactada":182863,"puntaje_datacredito":791,"cant_creditosvigentes":5,"huella_consulta":4,"saldo_mora":0,"saldo_total":16178,"saldo_principal":14442,"saldo_mora_codeudor":0,"creditos_sectorFinanciero":2,"creditos_sectorCooperativo":0,"creditos_sectorReal":1,"promedio_ingresos_datacredito":1204496,"tendencia_ingresos":"Creciente"}'
+```
+```json
+{"probabilidad_mora":0.2942,"clase":0,"nivel":"bajo","decision":"aprobar","umbral":0.4962}
+```
+
+Perfil riesgoso (23 anios, independiente, score 610, 14 consultas, 36 meses, tendencia decreciente, sin ingreso en la central):
+```json
+{"probabilidad_mora":0.7867,"clase":1,"nivel":"alto","decision":"rechazar","umbral":0.4962}
+```
+
+Campo faltante -> `HTTP 422` con el detalle de Pydantic. Lote de 2 solicitantes:
+```json
+{"n":2,"n_riesgo":0,"tasa_riesgo":0.0,"probabilidad_media":0.2519,"predicciones":[...]}
+```
+
+### Pruebas (`tests/test_api.py`)
+
+11 pruebas con `TestClient`: health, info, prediccion, monotonicidad (perfil peor -> mayor probabilidad),
+422 por campo faltante / extra / valor invalido, nulos de la central, batch, batch vacio y contrato de esquema.
+
+```bash
+python -m pytest tests -q
+```
+
+### Docker
+
+`Dockerfile`: `python:3.12-slim`, `libgomp1`, dependencias minimas (`requirements-api.txt`, sin jupyter / streamlit /
+xgboost), copia solo `ft_engineering.py`, `model_deploy.py`, `config.json`, el modelo y `metrics.json`, usuario no root,
+`EXPOSE 8000`, `HEALTHCHECK` sobre `/health`, `CMD uvicorn`. `.dockerignore` excluye venv, dataset, notebooks y reportes.
+
+```bash
+docker build -t riesgo-api:1.3.0 .
+```
+```bash
+docker run -d --name riesgo-api -p 8000:8000 riesgo-api:1.3.0
+```
+```bash
+curl http://localhost:8000/health
+```
+```bash
+docker logs riesgo-api
+```
+```bash
+docker stop riesgo-api && docker rm riesgo-api
+```
+
+El job `docker` del CI construye la imagen en cada push, levanta el contenedor, espera el `/health` y ejecuta un
+`/predict` real. Es la evidencia de que la imagen buildea y la API responde en un entorno limpio.
+
+### Despliegue
+
+1. Merge por PR `developer -> certification -> master`; el CI valida pipeline, pruebas e imagen en cada paso.
+2. En el servidor: `docker build` + `docker run` con el tag de la version (o `docker pull` desde un registry si se publica).
+3. Operacion: `/health` para el balanceador, `model_monitoring.py --nuevos ventana.csv --strict` como job periodico
+   sobre las solicitudes recibidas; si detecta drift, reentrenar con `model_training_evaluation.py` y reconstruir la imagen.
