@@ -1,0 +1,11 @@
+# Tema base de Streamlit. La paleta clara/oscura de la app se inyecta desde app_streamlit.py (aplicar_css);
+# aca solo se fija el color primario corporativo para sliders, focus y widgets nativos.
+[theme]
+primaryColor = "#2563eb"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true

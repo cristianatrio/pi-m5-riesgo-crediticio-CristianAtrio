@@ -4,9 +4,23 @@ Proyecto Integrador del Modulo 5 (Data Science, Henry). Modelo de machine learni
 que anticipa si un nuevo solicitante de credito pagara a tiempo, desplegado como API
 (FastAPI + Docker) con monitoreo de data drift y una app Streamlit.
 
-> Estado actual: **V1.1.0** - ingenieria de caracteristicas (`ft_engineering.py`) y primeros modelos
-> entrenados, evaluados y comparados (`model_training_evaluation.py`). Modelo ganador: **Random Forest**,
-> ROC-AUC 0,70 en test, serializado en `mlops_pipeline/models/modelo_riesgo.joblib`.
+## Caso de negocio
+
+Una financiera otorga creditos de consumo de corto plazo (mediana 1,9 M a 10 meses). El 4,75% de los
+creditos no se paga a tiempo y cada mora cuesta capital, cobranza y provisiones. Hoy la decision se apoya en
+el score de la central de riesgo y en reglas manuales. El objetivo es un modelo que, con los datos disponibles
+**en el momento de la solicitud** (solicitante, producto e historial en la central), estime la probabilidad de
+mora de cada nuevo cliente para priorizar analisis, ajustar montos o rechazar.
+
+Restricciones: estructura de carpetas fija (pipelines de Jenkins), flujo de ramas `developer -> certification ->
+master` con PR aprobado por un par, y todo reproducible desde el repo.
+
+Resultado: el modelo detecta el 31% de las moras marcando el 8% de las solicitudes (test), con PR-AUC que
+triplica el azar. Las variables que mas pesan son el score de la central, las consultas recientes, el plazo
+y la edad. Un score interno (`puntaje`) fue descartado por contener el resultado.
+
+> Estado actual: **V1.2.0** - monitoreo de data drift (`model_monitoring.py`), app Streamlit
+> (`app_streamlit.py`) y CI en GitHub Actions. Modelo en produccion: **Random Forest**, ROC-AUC 0,70 en test.
 
 ## Estructura del repositorio (no modificar: los pipelines de Jenkins dependen de ella)
 
@@ -19,11 +33,14 @@ mlops_pipeline/
 │   ├── model_training_evaluation.py
 │   ├── model_deploy.py
 │   ├── model_monitoring.py
-│   └── config.json            # parametros del proyecto (target, exclusiones, rangos, seed)
+│   ├── app_streamlit.py       # app de prediccion, explicacion, lote y monitoreo
+│   └── config.json            # parametros del proyecto (target, exclusiones, rangos, seed, umbrales de drift)
 ├── models/                    # modelo_riesgo.joblib (preprocesador + modelo), feature_names.json
 ├── reports/                   # metrics.json, comparacion_modelos.csv, importancia_variables.csv
-│   └── figures/               # curvas ROC/PR, matrices de confusion, comparacion, importancias
+│   ├── figures/               # curvas ROC/PR, matrices de confusion, comparacion, importancias
+│   └── drift/                 # reportes de drift (json, md, csv) y figuras PSI por escenario
 └── data/                      # splits transformados (parquet, ignorados por git)
+.github/workflows/ci.yml       # CI: compila, corre feature engineering, monitoreo y smoke test del modelo
 Base_de_datos.csv
 requirements.txt
 set_up.bat                     # crea el venv, instala requirements y registra el kernel
@@ -45,7 +62,8 @@ readme.md
 | V1.0.1 | `Cargar_datos.ipynb` y `comprension_eda.ipynb` |
 | V1.0.2 | Correcciones del review del EDA (rango completo de `puntaje_datacredito`, etiquetas y conteos) |
 | V1.1.0 | Ingenieria de caracteristicas + entrenamiento, evaluacion y seleccion de modelos |
-| V1.2.0+ | Monitoreo, Streamlit, API, Docker |
+| V1.2.0 | Monitoreo de data drift, app Streamlit, CI con GitHub Actions |
+| V1.3.0+ | API FastAPI, Docker, SonarCloud |
 
 ## Setup local
 
@@ -145,3 +163,55 @@ Coinciden con el bivariable del EDA.
 
 Figuras en `mlops_pipeline/reports/figures/`: `curvas_roc_pr.png`, `matrices_confusion.png`,
 `comparacion_modelos.png`, `importancia_variables.png`. Metricas completas en `mlops_pipeline/reports/metrics.json`.
+
+## Avance 3 - Monitoreo de data drift, app Streamlit y CI
+
+### `model_monitoring.py`
+
+Compara una ventana de datos nuevos contra la referencia de entrenamiento (train del split oficial) sobre las
+20 columnas crudas que recibe la API. Implementacion propia con numpy / scipy (sin `evidently`: dependencias
+pesadas, incompatible con pandas 3 y menos transparente para auditar).
+
+| Tipo de variable | Metrica | Test estadistico |
+|---|---|---|
+| Numericas (17) | PSI con 10 bins por cuantiles de la referencia | Kolmogorov-Smirnov 2 muestras |
+| Categoricas (3) | PSI sobre frecuencias | Chi-cuadrado |
+| Prediccion | PSI de `predict_proba` + tasa de solicitudes marcadas como riesgo | - |
+| Target (si existe) | Tasa de mora referencia vs. actual | - |
+
+Semaforo por variable: PSI < 0,1 ok, 0,1 a 0,25 alerta, > 0,25 critico. Alerta global si hay >= 1 critico o
+>= 3 alertas. Salida: `reports/drift/drift_report_<escenario>.{json,md}`, `drift_features_<escenario>.csv`,
+figuras PSI y distribuciones.
+
+```bash
+python mlops_pipeline/src/model_monitoring.py                        # simula ambos escenarios
+python mlops_pipeline/src/model_monitoring.py --nuevos ventana.csv   # datos reales
+python mlops_pipeline/src/model_monitoring.py --nuevos ventana.csv --strict   # exit 1 si hay drift (jobs / CI)
+```
+
+Escenarios simulados (no hay datos de produccion todavia):
+
+| Escenario | Ventana | Resultado |
+|---|---|---|
+| `temporal` | Creditos desembolsados desde 2025-10-01 (825) vs. train anterior al corte | **Drift detectado**: `promedio_ingresos_datacredito` critico (PSI 0,58), `capital_prestado`, `salario_cliente` y `total_otros_prestamos` en alerta. El mix de productos cambio (capital mediano +33%). La prediccion se mantiene estable (PSI 0,04) y la mora baja a 3,5% por censura. |
+| `sintetico` | 2.000 creditos con drift inyectado (clientes mas jovenes, mas consultas, score -45, salario -20%, mas tendencia decreciente) | **Drift detectado**: 3 criticos, 2 alertas, PSI de la prediccion 0,68, tasa de riesgo 9% -> 24%. Es el autotest del detector: el script devuelve exit 2 si no lo marca. |
+
+### `app_streamlit.py`
+
+```bash
+streamlit run mlops_pipeline/src/app_streamlit.py
+```
+
+- **Prediccion**: formulario con las 20 variables crudas (solicitante, credito, central de riesgo), valores por
+  defecto = mediana historica, opcion "la central no tiene dato". Devuelve probabilidad de mora, clasificacion
+  (bajo / medio / alto) con el umbral operativo de `metrics.json` ajustable, y comparacion contra el pagador tipico.
+- **Explicacion**: importancia por permutacion del modelo y lectura de negocio de cada variable.
+- **Lote**: subir un CSV de solicitantes, validacion de esquema, prediccion batch y descarga.
+- **Monitoreo**: semaforo de drift por variable y drift de prediccion desde los reportes de `model_monitoring.py`.
+
+### CI/CD (`.github/workflows/ci.yml`)
+
+En cada push a `developer` / `certification` / `master` y en cada PR: instala `requirements.txt` fijado,
+compila los scripts, corre `ft_engineering.py`, corre el monitoreo en ambos escenarios (falla si el detector no
+marca el drift sintetico), hace un smoke test del modelo serializado y publica los reportes de drift como
+artefacto. Es la validacion automatica previa al merge; el despliegue (Docker) se agrega en el Avance 4.
