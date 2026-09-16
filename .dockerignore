@@ -1,0 +1,22 @@
+# Solo entra a la imagen lo que la API necesita (ver Dockerfile: COPY explicitos)
+*-venv/
+venv/
+.venv/
+.git/
+.github/
+.claude/
+.streamlit/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+Base_de_datos.csv
+mlops_pipeline/data/
+mlops_pipeline/reports/figures/
+mlops_pipeline/reports/drift/
+mlops_pipeline/src/*.ipynb
+mlops_pipeline/src/app_streamlit.py
+mlops_pipeline/src/model_training_evaluation.py
+mlops_pipeline/src/model_monitoring.py
+*.md
+set_up.bat

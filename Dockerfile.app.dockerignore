@@ -1,0 +1,15 @@
+# Contexto para Dockerfile.app (BuildKit usa <Dockerfile>.dockerignore). Los COPY son explicitos;
+# aca solo se evita subir el venv y basura al daemon.
+*-venv/
+venv/
+.venv/
+.git/
+.github/
+.claude/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+mlops_pipeline/data/
+mlops_pipeline/reports/figures/
+mlops_pipeline/src/*.ipynb

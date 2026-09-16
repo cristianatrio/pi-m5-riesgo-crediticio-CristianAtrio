@@ -1,0 +1,9 @@
+# Dependencias minimas para la imagen de la app Streamlit (Dockerfile.app). Mismas versiones que requirements.txt.
+pandas==3.0.5
+numpy==2.5.2
+scipy==1.18.1
+scikit-learn==1.9.0
+feature-engine==1.9.4
+joblib==1.6.0
+pyarrow==25.0.1
+streamlit==1.63.0
