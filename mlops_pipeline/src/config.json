@@ -4,5 +4,18 @@
   "dataset_path": "Base_de_datos.csv",
   "target": "Pago_atiempo",
   "positive_class_label": "0 = no pago a tiempo (riesgo)",
-  "random_state": 42
+  "random_state": 42,
+  "test_size": 0.2,
+  "cv_folds": 5,
+  "features_excluidas": ["puntaje", "fecha_prestamo"],
+  "motivo_exclusion": {
+    "puntaje": "Fuga de informacion: separa perfectamente las clases (ver comprension_eda.ipynb, seccion 3.8)",
+    "fecha_prestamo": "No generaliza a creditos futuros; se reserva para el split temporal del monitoreo"
+  },
+  "rango_valido": {
+    "edad_cliente": [18, 99],
+    "puntaje_datacredito": [150, 950]
+  },
+  "categorias_tendencia": ["Creciente", "Estable", "Decreciente"],
+  "umbral_default": 0.5
 }

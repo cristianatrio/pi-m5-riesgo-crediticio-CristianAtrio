@@ -1,0 +1,92 @@
+{
+  "modelo_ganador": "Random Forest",
+  "criterio_seleccion": "mayor ROC-AUC medio en CV; desempate por PR-AUC y F1 en CV. Accuracy excluido por desbalance.",
+  "umbral_decision": 0.4962,
+  "nota_umbral": "Elegido maximizando F1 sobre probabilidades out-of-fold del train; CV y test se reportan a este umbral.",
+  "cv": {
+    "roc_auc": {
+      "mean": 0.678274216688518,
+      "std": 0.04819463638486952
+    },
+    "pr_auc": {
+      "mean": 0.13946248090038005,
+      "std": 0.02780914166407767
+    },
+    "precision": {
+      "mean": 0.15954273402543712,
+      "std": 0.04553896725850483
+    },
+    "recall": {
+      "mean": 0.22731105088828665,
+      "std": 0.03543057755244224
+    },
+    "f1": {
+      "mean": 0.18651696713538152,
+      "std": 0.041942640630334926
+    }
+  },
+  "test": {
+    "roc_auc": 0.6994770604487528,
+    "pr_auc": 0.1431233302929074,
+    "precision": 0.18181818181818182,
+    "recall": 0.3137254901960784,
+    "f1": 0.2302158273381295
+  },
+  "matriz_confusion_test": {
+    "tn": 1907,
+    "fp": 144,
+    "fn": 70,
+    "tp": 32
+  },
+  "top_features": [
+    "puntaje_datacredito",
+    "huella_consulta",
+    "promedio_ingresos_datacredito",
+    "plazo_meses",
+    "edad_cliente",
+    "total_otros_prestamos",
+    "ratio_deuda_salario",
+    "tendencia_ingresos_Creciente",
+    "plazo_largo",
+    "cant_creditosvigentes"
+  ],
+  "nota_importancia": "Permutacion sobre test, analisis post-hoc; no participa de la seleccion.",
+  "n_train": 8610,
+  "n_test": 2153,
+  "tasa_mora_train": 0.04750290360046457,
+  "features_modelo": [
+    "capital_prestado",
+    "plazo_meses",
+    "edad_cliente",
+    "salario_cliente",
+    "total_otros_prestamos",
+    "cuota_pactada",
+    "puntaje_datacredito",
+    "cant_creditosvigentes",
+    "huella_consulta",
+    "saldo_mora",
+    "saldo_principal",
+    "saldo_mora_codeudor",
+    "creditos_sectorFinanciero",
+    "creditos_sectorCooperativo",
+    "creditos_sectorReal",
+    "promedio_ingresos_datacredito",
+    "promedio_ingresos_datacredito_na",
+    "saldo_mora_na",
+    "saldo_principal_na",
+    "saldo_mora_codeudor_na",
+    "ratio_cuota_salario",
+    "ratio_deuda_salario",
+    "ratio_capital_salario",
+    "plazo_largo",
+    "sin_historial_financiero",
+    "tipo_credito_4",
+    "tipo_credito_Rare",
+    "tipo_credito_10",
+    "tipo_laboral_Empleado",
+    "tendencia_ingresos_Creciente",
+    "tendencia_ingresos_Decreciente",
+    "tendencia_ingresos_Estable"
+  ],
+  "random_state": 42
+}
