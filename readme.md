@@ -44,8 +44,11 @@ mlops_pipeline/
 .github/workflows/ci.yml       # CI: compila, feature engineering, monitoreo, pytest, build y prueba de la imagen Docker
 tests/test_api.py              # pruebas de la API y del contrato del pipeline (pytest)
 Dockerfile                     # imagen de la API (python:3.12-slim, usuario no root, healthcheck)
-.dockerignore
-requirements-api.txt           # dependencias minimas de la imagen
+Dockerfile.app                 # imagen de la app Streamlit (opcional)
+docker-compose.yml             # api + app como dos servicios
+.dockerignore / Dockerfile.app.dockerignore
+requirements-api.txt           # dependencias minimas de la imagen de la API
+requirements-app.txt           # dependencias minimas de la imagen de la app
 Base_de_datos.csv
 requirements.txt               # dependencias completas de desarrollo y CI
 set_up.bat                     # crea el venv, instala requirements y registra el kernel
@@ -314,9 +317,32 @@ $ curl -X POST .../predict (ejemplo)   -> {"probabilidad_mora":0.2942,"clase":0,
 El job `docker` del CI repite lo mismo en cada push: construye la imagen, levanta el contenedor, espera el `/health`
 y ejecuta un `/predict` real. Es la evidencia de que la imagen buildea y la API responde en un entorno limpio.
 
+### Streamlit en Docker (opcional) y `docker-compose`
+
+`Dockerfile.app` empaqueta la app con el historico, el modelo, las metricas y los reportes de drift
+(`requirements-app.txt`, sin fastapi). Un proceso por contenedor: la API y la app son dos servicios separados en
+`docker-compose.yml`, cada uno con su healthcheck y su puerto.
+
+```bash
+docker compose up -d --build
+```
+```bash
+docker compose ps
+```
+```bash
+docker compose down
+```
+
+| Servicio | Imagen | Puerto | Healthcheck |
+|---|---|---|---|
+| `api` | `riesgo-api:1.3.0` (831 MB) | 8000 -> `/docs` | `GET /health` |
+| `app` | `riesgo-app:1.3.0` (1,17 GB) | 8501 | `GET /_stcore/health` |
+
+Resultado local: ambos contenedores `Up (healthy)`, API y app respondiendo 200. El CI construye las dos imagenes.
+
 ### Despliegue
 
 1. Merge por PR `developer -> certification -> master`; el CI valida pipeline, pruebas e imagen en cada paso.
-2. En el servidor: `docker build` + `docker run` con el tag de la version (o `docker pull` desde un registry si se publica).
+2. En el servidor: `docker compose up -d --build` (API + app) o solo `docker build` / `docker run` de la API, con el tag de la version.
 3. Operacion: `/health` para el balanceador, `model_monitoring.py --nuevos ventana.csv --strict` como job periodico
    sobre las solicitudes recibidas; si detecta drift, reentrenar con `model_training_evaluation.py` y reconstruir la imagen.

@@ -60,6 +60,9 @@ jobs:
       - name: Build de la imagen de la API
         run: docker build -t riesgo-api:ci .
 
+      - name: Build de la imagen de la app Streamlit
+        run: docker build -f Dockerfile.app -t riesgo-app:ci .
+
       - name: Levantar el contenedor y probar los endpoints
         run: |
           docker run -d --name riesgo-api -p 8000:8000 riesgo-api:ci
