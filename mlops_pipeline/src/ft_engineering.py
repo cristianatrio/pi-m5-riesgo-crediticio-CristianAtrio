@@ -242,7 +242,7 @@ def construir_preprocesador(escalar: bool = True) -> Pipeline:
     ]
     if escalar:
         pasos.append(("escalado", StandardScaler().set_output(transform="pandas")))
-    return Pipeline(pasos)
+    return Pipeline(pasos, memory=None)  # sin cache: el pipeline es liviano y se reajusta en cada fold
 
 
 # ---------------------------------------------------------------------------
@@ -287,21 +287,21 @@ def main() -> None:
     # El preprocesador se ajusta SOLO con train: medianas, percentiles y categorias raras
     # se aprenden ahi y se reutilizan tal cual en test y en produccion.
     preprocesador = construir_preprocesador()
-    X_train_t = preprocesador.fit_transform(X_train, y_train)
-    X_test_t = preprocesador.transform(X_test)
+    x_train_t = preprocesador.fit_transform(X_train, y_train)
+    x_test_t = preprocesador.transform(X_test)
 
     descartadas = preprocesador.named_steps["drop_correlacionadas"].features_to_drop_
-    print(f"Features de salida: {X_train_t.shape[1]} | descartadas por correlacion: {sorted(descartadas)}")
-    if X_train_t.isna().any().any():
+    print(f"Features de salida: {x_train_t.shape[1]} | descartadas por correlacion: {sorted(descartadas)}")
+    if x_train_t.isna().any().any():
         raise RuntimeError("Quedaron nulos despues del pipeline")
 
     # Splits transformados: solo para inspeccion y tests (ignorados por git, regenerables)
-    X_train_t.to_parquet(DATA_DIR / "X_train.parquet")
-    X_test_t.to_parquet(DATA_DIR / "X_test.parquet")
+    x_train_t.to_parquet(DATA_DIR / "X_train.parquet")
+    x_test_t.to_parquet(DATA_DIR / "X_test.parquet")
     y_train.to_frame().to_parquet(DATA_DIR / "y_train.parquet")
     y_test.to_frame().to_parquet(DATA_DIR / "y_test.parquet")
     print(f"Splits transformados guardados en {DATA_DIR}")
-    print(X_train_t.describe().T[["mean", "std", "min", "max"]].round(2).to_string())
+    print(x_train_t.describe().T[["mean", "std", "min", "max"]].round(2).to_string())
 
 
 if __name__ == "__main__":
