@@ -31,6 +31,20 @@
     "Decreciente"
   ],
   "umbral_default": 0.5,
+  "censura": {
+    "meses_minimos_observacion": 6,
+    "fecha_referencia": null,
+    "nota": "Un credito entra al modelado si ya vencio (meses observados >= plazo) o si lleva al menos meses_minimos_observacion meses desde el desembolso. Los mas recientes todavia no tuvieron tiempo de caer en mora (EDA 3.6). fecha_referencia null = fecha maxima del dataset (proxy de la fecha de extraccion)."
+  },
+  "validacion_temporal": {
+    "fraccion_oot": 0.2,
+    "nota": "Evaluacion out-of-time: se entrena con el 80% mas antiguo (por fecha_prestamo) y se evalua con el 20% mas reciente."
+  },
+  "costos": {
+    "perdida_por_mora": 0.6,
+    "margen_por_credito_sano": 0.15,
+    "nota": "Supuestos de negocio por unidad de capital prestado. Aprobar un credito que cae en mora pierde el 60% del capital (LGD); rechazar a un buen pagador pierde el 15% de margen financiero. El umbral operativo minimiza el costo esperado. Ajustar con los valores reales del area de riesgo."
+  },
   "drift": {
     "psi_alerta": 0.1,
     "psi_critico": 0.25,

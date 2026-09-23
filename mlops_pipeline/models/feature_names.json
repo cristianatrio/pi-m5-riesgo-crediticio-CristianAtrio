@@ -25,10 +25,10 @@
   "plazo_largo",
   "sin_historial_financiero",
   "tipo_credito_4",
-  "tipo_credito_Rare",
   "tipo_credito_10",
+  "tipo_credito_Rare",
   "tipo_laboral_Empleado",
   "tendencia_ingresos_Creciente",
-  "tendencia_ingresos_Decreciente",
-  "tendencia_ingresos_Estable"
+  "tendencia_ingresos_Estable",
+  "tendencia_ingresos_Decreciente"
 ]

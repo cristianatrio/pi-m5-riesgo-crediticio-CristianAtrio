@@ -263,6 +263,37 @@ def separar_target(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     return X, y
 
 
+DIAS_POR_MES = 30.44
+
+
+def filtrar_censura(df: pd.DataFrame, meses_minimos: float | None = None, fecha_referencia=None) -> pd.DataFrame:
+    """Excluye los creditos cuyo resultado todavia no se observa (censura, EDA 3.6).
+
+    Un credito se conserva si ya vencio (meses observados >= plazo) o si lleva al menos
+    ``meses_minimos`` meses desde el desembolso. Los mas recientes figuran como "pago a
+    tiempo" solo porque no tuvieron tiempo de caer en mora: entrenar con ellos mete ruido
+    en el target.
+    """
+    cfg = CONFIG["censura"]
+    meses = cfg["meses_minimos_observacion"] if meses_minimos is None else meses_minimos
+    fecha = fecha_referencia or cfg["fecha_referencia"]
+    referencia = pd.Timestamp(fecha) if fecha else df["fecha_prestamo"].max()
+    meses_observados = (referencia - df["fecha_prestamo"]).dt.days / DIAS_POR_MES
+    observable = meses_observados >= np.minimum(df["plazo_meses"], meses)
+    return df.loc[observable].copy()
+
+
+def dividir_temporal(X: pd.DataFrame, y: pd.Series, fraccion_oot: float | None = None):
+    """Split out-of-time: historico (mas antiguo) vs. ventana mas reciente, por fecha_prestamo.
+
+    Simula el uso real del modelo: se entrena con el pasado y se aplica a creditos futuros.
+    """
+    fraccion = CONFIG["validacion_temporal"]["fraccion_oot"] if fraccion_oot is None else fraccion_oot
+    corte = X["fecha_prestamo"].quantile(1 - fraccion)
+    historico = X["fecha_prestamo"] < corte
+    return X[historico], X[~historico], y[historico], y[~historico]
+
+
 def dividir_train_test(X, y, test_size: float | None = None, random_state: int | None = None):
     """Split estratificado: con 4,75% de positivos hay que preservar la proporcion."""
     return train_test_split(
@@ -279,7 +310,9 @@ def dividir_train_test(X, y, test_size: float | None = None, random_state: int |
 def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    df = cargar_datos()
+    crudo = cargar_datos()
+    df = filtrar_censura(crudo)
+    print(f"Censura: {len(crudo) - len(df):,} creditos recientes excluidos | quedan {len(df):,}")
     X, y = separar_target(df)
     X_train, X_test, y_train, y_test = dividir_train_test(X, y)
     print(f"Train: {X_train.shape} | mora {y_train.mean():.2%}   Test: {X_test.shape} | mora {y_test.mean():.2%}")

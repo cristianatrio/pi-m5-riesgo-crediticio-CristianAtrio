@@ -1,59 +1,95 @@
 {
   "modelo_ganador": "Random Forest",
   "criterio_seleccion": "mayor ROC-AUC medio en CV; desempate por PR-AUC y F1 en CV. Accuracy excluido por desbalance.",
-  "umbral_decision": 0.4962,
-  "nota_umbral": "Elegido maximizando F1 sobre probabilidades out-of-fold del train; CV y test se reportan a este umbral.",
+  "umbral_decision": 0.66,
+  "umbral_f1": 0.4835,
+  "nota_umbral": "Umbral operativo = minimo costo esperado sobre probabilidades out-of-fold del train (ver 'costos'). Metricas de decision de CV, test y out-of-time reportadas a este umbral. umbral_f1 queda como referencia.",
+  "costos": {
+    "supuestos": {
+      "perdida_por_mora": 0.6,
+      "margen_por_credito_sano": 0.15
+    },
+    "test": {
+      "costo": 137759389.2,
+      "costo_sin_modelo": 141413726.15999997,
+      "ahorro_pct": 0.025841458670464168,
+      "tasa_rechazo": 0.009828009828009828
+    }
+  },
   "cv": {
     "roc_auc": {
-      "mean": 0.678274216688518,
-      "std": 0.04819463638486952
+      "mean": 0.6861690754042115,
+      "std": 0.024773083261146613
     },
     "pr_auc": {
-      "mean": 0.13946248090038005,
-      "std": 0.02780914166407767
+      "mean": 0.1584347747134584,
+      "std": 0.03426541562542939
+    },
+    "ks": {
+      "mean": 0.2989316687463671,
+      "std": 0.05067869658931573
+    },
+    "gini": {
+      "mean": 0.3723381508084229,
+      "std": 0.049546166522293225
     },
     "precision": {
-      "mean": 0.15954273402543712,
-      "std": 0.04553896725850483
+      "mean": 0.4233799533799535,
+      "std": 0.1140823023456224
     },
     "recall": {
-      "mean": 0.22731105088828665,
-      "std": 0.03543057755244224
+      "mean": 0.07708957708957709,
+      "std": 0.022843191784912634
     },
     "f1": {
-      "mean": 0.18651696713538152,
-      "std": 0.041942640630334926
+      "mean": 0.12938063579527878,
+      "std": 0.03674888982449263
     }
   },
   "test": {
-    "roc_auc": 0.6994770604487528,
-    "pr_auc": 0.1431233302929074,
-    "precision": 0.18181818181818182,
-    "recall": 0.3137254901960784,
-    "f1": 0.2302158273381295
+    "roc_auc": 0.6942006319619546,
+    "pr_auc": 0.12719307462940427,
+    "ks": 0.3311363612183886,
+    "gini": 0.38840126392390917,
+    "precision": 0.3,
+    "recall": 0.061855670103092786,
+    "f1": 0.10256410256410256
+  },
+  "out_of_time": {
+    "roc_auc": 0.7201249121200726,
+    "pr_auc": 0.12617624438910865,
+    "ks": 0.34743227114431924,
+    "gini": 0.44024982424014514,
+    "precision": 0.21739130434782608,
+    "recall": 0.08064516129032258,
+    "f1": 0.11764705882352941,
+    "ahorro_pct": 0.04263629685572434
   },
   "matriz_confusion_test": {
-    "tn": 1907,
-    "fp": 144,
-    "fn": 70,
-    "tp": 32
+    "tn": 1924,
+    "fp": 14,
+    "fn": 91,
+    "tp": 6
   },
+  "nota_importancia": "Permutacion sobre test, analisis post-hoc; no participa de la seleccion.",
+  "random_state": 42,
   "top_features": [
     "puntaje_datacredito",
     "huella_consulta",
+    "edad_cliente",
     "promedio_ingresos_datacredito",
     "plazo_meses",
-    "edad_cliente",
-    "total_otros_prestamos",
-    "ratio_deuda_salario",
-    "tendencia_ingresos_Creciente",
-    "plazo_largo",
-    "cant_creditosvigentes"
+    "tipo_laboral_Empleado",
+    "cuota_pactada",
+    "saldo_mora",
+    "capital_prestado",
+    "saldo_principal"
   ],
-  "nota_importancia": "Permutacion sobre test, analisis post-hoc; no participa de la seleccion.",
-  "n_train": 8610,
-  "n_test": 2153,
-  "tasa_mora_train": 0.04750290360046457,
+  "n_train": 8137,
+  "n_test": 2035,
+  "n_excluidos_censura": 591,
+  "n_oot": 2035,
+  "tasa_mora_train": 0.04780631682438245,
   "features_modelo": [
     "capital_prestado",
     "plazo_meses",
@@ -81,12 +117,11 @@
     "plazo_largo",
     "sin_historial_financiero",
     "tipo_credito_4",
-    "tipo_credito_Rare",
     "tipo_credito_10",
+    "tipo_credito_Rare",
     "tipo_laboral_Empleado",
     "tendencia_ingresos_Creciente",
-    "tendencia_ingresos_Decreciente",
-    "tendencia_ingresos_Estable"
-  ],
-  "random_state": 42
+    "tendencia_ingresos_Estable",
+    "tendencia_ingresos_Decreciente"
+  ]
 }
