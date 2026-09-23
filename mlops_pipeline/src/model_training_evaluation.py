@@ -2,24 +2,27 @@
 Entrenamiento y evaluacion de modelos supervisados para riesgo crediticio (PI M5).
 
 Flujo:
-1. Carga el dataset crudo y hace el split estratificado (ft_engineering).
-2. Para cada modelo arma ``Pipeline(preprocesador, clasificador)`` -> el fit del
+1. Carga el dataset crudo y excluye los creditos censurados: los que todavia no vencieron
+   ni tienen la ventana minima de observacion (ft_engineering.filtrar_censura, EDA 3.6).
+2. Split estratificado train / test y, aparte, split out-of-time (historico vs. ventana
+   mas reciente) para medir como rinde el modelo con creditos futuros.
+3. Para cada modelo arma ``Pipeline(preprocesador, clasificador)`` -> el fit del
    preprocesador ocurre dentro de cada fold, sin fuga de imputaciones ni percentiles.
-3. Validacion cruzada estratificada (5 folds) con UN solo ajuste por fold: de las
-   probabilidades out-of-fold (OOF) salen ROC-AUC y PR-AUC por fold, el umbral de
-   decision (maximo F1 sobre el OOF completo) y precision / recall / F1 por fold a
-   ese mismo umbral. CV y test quedan bajo la misma regla de decision.
-   Limitacion conocida: el umbral se elige sobre el mismo OOF con el que se reporta
-   F1 en CV, lo que introduce un sesgo optimista leve. Una validacion anidada lo
-   eliminaria a costa de 5x tiempo; el test (nunca usado para elegir) es la
-   estimacion honesta.
-4. Evaluacion en test, tabla comparativa, curvas ROC / PR, matrices de confusion.
-5. Seleccion del ganador por ROC-AUC medio en CV (calidad del ranking, independiente
-   del umbral), desempate por PR-AUC y F1 en CV. El umbral es una decision operativa
-   posterior, no un criterio de seleccion.
-6. Importancia por permutacion sobre test: analisis post-hoc para explicar el modelo
-   elegido, no evidencia adicional de performance.
-7. Serializacion del pipeline completo (preprocesador + modelo) en
+4. Validacion cruzada estratificada (5 folds) con UN solo ajuste por fold. De las
+   probabilidades out-of-fold (OOF) salen ROC-AUC, PR-AUC, KS y Gini por fold y el
+   umbral de decision: el que MINIMIZA EL COSTO ESPERADO de negocio (moras aprobadas
+   x perdida + buenos clientes rechazados x margen, ponderado por capital; supuestos en
+   config.json -> "costos"). Precision / recall / F1 por fold se reportan a ese umbral.
+   Tambien se registra el umbral de maximo F1 como referencia.
+   Limitacion conocida: el umbral se elige sobre el mismo OOF con el que se reportan
+   las metricas de decision en CV (sesgo optimista leve); test y out-of-time, que nunca
+   intervienen en la eleccion, son las estimaciones honestas.
+5. Evaluacion en test y out-of-time, tabla comparativa, curvas ROC / PR, matrices de
+   confusion y curva de costo por umbral del ganador.
+6. Seleccion del ganador por ROC-AUC medio en CV (calidad del ranking, independiente
+   del umbral), desempate por PR-AUC y F1 en CV.
+7. Importancia por permutacion sobre test: analisis post-hoc del modelo elegido.
+8. Serializacion del pipeline completo (preprocesador + modelo) en
    ``mlops_pipeline/models/modelo_riesgo.joblib``; es el unico artefacto de inferencia.
 
 Uso::
@@ -70,14 +73,19 @@ from ft_engineering import (  # noqa: E402
     RANDOM_STATE,
     cargar_datos,
     construir_preprocesador,
+    dividir_temporal,
     dividir_train_test,
+    filtrar_censura,
     separar_target,
 )
 
 REPORTS_DIR = RAIZ / "mlops_pipeline" / "reports"
 FIG_DIR = REPORTS_DIR / "figures"
 CV_FOLDS = CONFIG["cv_folds"]
-METRICAS = ["roc_auc", "pr_auc", "precision", "recall", "f1"]
+COSTOS = CONFIG["costos"]
+METRICAS = ["roc_auc", "pr_auc", "ks", "gini", "precision", "recall", "f1"]
+UMBRALES_CANDIDATOS = np.round(np.arange(0.01, 1.0, 0.01), 2)
+UMBRAL_DUMMY = 0.5
 sns.set_theme(style="whitegrid")
 
 
@@ -113,7 +121,7 @@ def definir_modelos(ratio_desbalance: float) -> dict[str, object]:
 
 
 # ---------------------------------------------------------------------------
-# Utilidades de evaluacion
+# Umbral de decision: F1 (referencia) y costo de negocio (operativo)
 # ---------------------------------------------------------------------------
 def umbral_optimo_f1(y_true, proba) -> float:
     """Umbral que maximiza F1 de la clase mora sobre probabilidades out-of-fold."""
@@ -124,14 +132,58 @@ def umbral_optimo_f1(y_true, proba) -> float:
     return float(umbrales[int(np.argmax(f1))])
 
 
+def costo_por_umbral(y_true, proba, capital, umbrales=UMBRALES_CANDIDATOS) -> np.ndarray:
+    """Costo esperado para cada umbral, ponderado por el capital de cada credito.
+
+    Mora aprobada (falso negativo): se pierde ``perdida_por_mora`` x capital.
+    Buen pagador rechazado (falso positivo): se pierde ``margen_por_credito_sano`` x capital.
+    """
+    y = np.asarray(y_true)
+    cap = np.asarray(capital, dtype=float)
+    rechaza = np.asarray(proba)[None, :] >= np.asarray(umbrales)[:, None]
+    moras_aprobadas = (~rechaza & (y == 1)) @ cap
+    sanos_rechazados = (rechaza & (y == 0)) @ cap
+    return COSTOS["perdida_por_mora"] * moras_aprobadas + COSTOS["margen_por_credito_sano"] * sanos_rechazados
+
+
+def umbral_optimo_costo(y_true, proba, capital) -> float:
+    """Umbral candidato con el menor costo esperado sobre las probabilidades OOF."""
+    return float(UMBRALES_CANDIDATOS[int(np.argmin(costo_por_umbral(y_true, proba, capital)))])
+
+
+def resumen_costo(y_true, proba, capital, umbral: float) -> dict[str, float]:
+    """Costo con el modelo vs. aprobar a todos (la politica sin modelo) y tasa de rechazo."""
+    y = np.asarray(y_true)
+    cap = np.asarray(capital, dtype=float)
+    costo = float(costo_por_umbral(y, proba, cap, [umbral])[0])
+    sin_modelo = float(COSTOS["perdida_por_mora"] * cap[y == 1].sum())
+    return {
+        "costo": costo,
+        "costo_sin_modelo": sin_modelo,
+        "ahorro_pct": 1 - costo / sin_modelo if sin_modelo > 0 else 0.0,
+        "tasa_rechazo": float((np.asarray(proba) >= umbral).mean()),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Utilidades de evaluacion
+# ---------------------------------------------------------------------------
 def calcular_metricas(y_true, proba, umbral: float) -> dict[str, float]:
-    """Metricas de ranking (independientes del umbral) y de decision (al umbral dado)."""
+    """Metricas de ranking (independientes del umbral) y de decision (al umbral dado).
+
+    KS y Gini son las metricas estandar de scoring crediticio: KS es la maxima separacion
+    entre las distribuciones acumuladas de morosos y cumplidores; Gini = 2 x ROC-AUC - 1.
+    """
     if len(y_true) != len(proba):
         raise ValueError("y_true y proba deben tener la misma cantidad de observaciones.")
     pred = (proba >= umbral).astype(int)
+    fpr, tpr, _ = roc_curve(y_true, proba)
+    auc = roc_auc_score(y_true, proba)
     return {
-        "roc_auc": roc_auc_score(y_true, proba),
+        "roc_auc": auc,
         "pr_auc": average_precision_score(y_true, proba),
+        "ks": float(np.max(tpr - fpr)),
+        "gini": 2 * auc - 1,
         "precision": precision_score(y_true, pred, zero_division=0),
         "recall": recall_score(y_true, pred, zero_division=0),
         "f1": f1_score(y_true, pred, zero_division=0),
@@ -151,33 +203,56 @@ def probabilidades_oof(pipe: Pipeline, X, y, cv) -> tuple[np.ndarray, list[np.nd
     return proba, folds
 
 
-def evaluar_modelo(nombre, clasificador, X_train, y_train, X_test, y_test, cv):
-    """CV (un fit por fold) + umbral OOF + ajuste final + test. Devuelve (fila, pipeline, proba_test)."""
+def evaluar_oot(pipe: Pipeline, oot: tuple, umbral: float) -> dict[str, float]:
+    """Reentrena con el historico y evalua en la ventana mas reciente (out-of-time)."""
+    x_hist, x_oot, y_hist, y_oot = oot
+    proba = clone(pipe).fit(x_hist, y_hist).predict_proba(x_oot)[:, 1]
+    resultado = {f"oot_{k}": v for k, v in calcular_metricas(y_oot, proba, umbral).items()}
+    resultado["oot_ahorro_pct"] = resumen_costo(y_oot, proba, x_oot["capital_prestado"], umbral)["ahorro_pct"]
+    return resultado
+
+
+def evaluar_modelo(nombre, clasificador, X_train, y_train, X_test, y_test, cv, oot=None):
+    """CV (un fit por fold) + umbrales OOF + ajuste final + test (+ out-of-time si se pasa).
+
+    Devuelve (fila, pipeline, proba_test).
+    """
     # memory=None explicito: sin cache de transformadores (cada fold reajusta el preprocesador)
     pipe = Pipeline([("preprocesador", construir_preprocesador()), ("modelo", clasificador)], memory=None)
     t0 = time.perf_counter()
 
     proba_oof, folds = probabilidades_oof(pipe, X_train, y_train, cv)
     es_dummy = nombre.startswith("Dummy")
-    umbral = 0.5 if es_dummy else umbral_optimo_f1(y_train, proba_oof)
+    umbral_f1 = UMBRAL_DUMMY if es_dummy else umbral_optimo_f1(y_train, proba_oof)
+    umbral = UMBRAL_DUMMY if es_dummy else umbral_optimo_costo(y_train, proba_oof, X_train["capital_prestado"])
 
-    # Metricas por fold, todas al mismo umbral que se usara en test
+    # Metricas por fold, todas al mismo umbral operativo que se usara en test y produccion
     y_arr = y_train.to_numpy()
     por_fold = pd.DataFrame([calcular_metricas(y_arr[idx], proba_oof[idx], umbral) for idx in folds])
 
     pipe.fit(X_train, y_train)
     proba_test = pipe.predict_proba(X_test)[:, 1]
 
-    fila = {"modelo": nombre, "umbral": round(umbral, 4)}
+    fila = {"modelo": nombre, "umbral": round(umbral, 4), "umbral_f1": round(umbral_f1, 4)}
     for k in METRICAS:
         fila[f"cv_{k}_mean"] = por_fold[k].mean()
         fila[f"cv_{k}_std"] = por_fold[k].std(ddof=0)
     fila.update({f"test_{k}": v for k, v in calcular_metricas(y_test, proba_test, umbral).items()})
+    costo_test = resumen_costo(y_test, proba_test, X_test["capital_prestado"], umbral)
+    fila["test_ahorro_pct"] = costo_test["ahorro_pct"]
+    fila["test_tasa_rechazo"] = costo_test["tasa_rechazo"]
+    if oot is not None:
+        fila.update(evaluar_oot(pipe, oot, umbral))
     fila["segundos"] = round(time.perf_counter() - t0, 1)
-    print(f"  {nombre:<22} CV ROC-AUC {fila['cv_roc_auc_mean']:.3f}+-{fila['cv_roc_auc_std']:.3f} | "
-          f"CV PR-AUC {fila['cv_pr_auc_mean']:.3f} | test ROC-AUC {fila['test_roc_auc']:.3f} | "
-          f"test recall {fila['test_recall']:.2f} @ umbral {umbral:.2f} | {fila['segundos']}s")
+    _imprimir_fila(fila)
     return fila, pipe, proba_test
+
+
+def _imprimir_fila(fila: dict) -> None:
+    oot = f" | OOT ROC-AUC {fila['oot_roc_auc']:.3f}" if "oot_roc_auc" in fila else ""
+    print(f"  {fila['modelo']:<22} CV ROC-AUC {fila['cv_roc_auc_mean']:.3f}+-{fila['cv_roc_auc_std']:.3f} | "
+          f"test ROC-AUC {fila['test_roc_auc']:.3f}{oot} | umbral costo {fila['umbral']:.2f} "
+          f"(F1 {fila['umbral_f1']:.2f}) | ahorro test {fila['test_ahorro_pct']:.1%} | {fila['segundos']}s")
 
 
 def seleccionar_ganador(tabla: pd.DataFrame) -> str:
@@ -196,12 +271,12 @@ def seleccionar_ganador(tabla: pd.DataFrame) -> str:
 # Graficos
 # ---------------------------------------------------------------------------
 def graficar_comparacion(tabla: pd.DataFrame) -> None:
-    cols = ["cv_roc_auc_mean", "cv_pr_auc_mean", "cv_recall_mean", "cv_precision_mean", "cv_f1_mean"]
+    cols = ["cv_roc_auc_mean", "cv_pr_auc_mean", "cv_ks_mean", "cv_recall_mean", "cv_precision_mean", "cv_f1_mean"]
     largo = tabla.melt(id_vars="modelo", value_vars=cols, var_name="metrica", value_name="valor")
     largo["metrica"] = largo["metrica"].str.replace("cv_", "").str.replace("_mean", "").str.upper()
     fig, ax = plt.subplots(figsize=(12, 5))
     sns.barplot(data=largo, x="metrica", y="valor", hue="modelo", ax=ax)
-    ax.set_title(f"Comparacion de modelos: media en CV ({CV_FOLDS} folds, clase mora, umbral optimizado por modelo)")
+    ax.set_title(f"Comparacion de modelos: media en CV ({CV_FOLDS} folds, clase mora, umbral de minimo costo)")
     ax.set_ylim(0, 1)
     ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
@@ -239,9 +314,26 @@ def graficar_matrices(y_test, probas: dict[str, np.ndarray], umbrales: dict[str,
             ax=ax, colorbar=False, cmap="Blues"
         )
         ax.set_title(f"{nombre}\numbral {umbrales[nombre]:.2f}", fontsize=9)
-    fig.suptitle("Matrices de confusion en test (umbral optimizado por F1 en train)")
+    fig.suptitle("Matrices de confusion en test (umbral de minimo costo esperado, elegido en train)")
     fig.tight_layout()
     fig.savefig(FIG_DIR / "matrices_confusion.png", dpi=120)
+    plt.close(fig)
+
+
+def graficar_costo(y_test, proba, capital, umbral: float, umbral_f1: float) -> None:
+    """Costo esperado en test (relativo a aprobar a todos) para cada umbral del ganador."""
+    costos = costo_por_umbral(y_test, proba, capital)
+    base = resumen_costo(y_test, proba, capital, umbral)["costo_sin_modelo"]
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    ax.plot(UMBRALES_CANDIDATOS, costos / base, color="steelblue")
+    ax.axhline(1, color="gray", ls="--", lw=1, label="sin modelo (aprobar a todos)")
+    ax.axvline(umbral, color="#d62728", ls="--", label=f"umbral de minimo costo ({umbral:.2f})")
+    ax.axvline(umbral_f1, color="#ff7f0e", ls=":", label=f"umbral de maximo F1 ({umbral_f1:.2f})")
+    ax.set(xlabel="Umbral de rechazo", ylabel="Costo relativo a aprobar a todos",
+           title="Costo esperado por umbral en test (perdida por mora vs. margen perdido)")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(FIG_DIR / "costo_umbral.png", dpi=120)
     plt.close(fig)
 
 
@@ -269,20 +361,51 @@ def importancia_variables(pipe: Pipeline, X_test, y_test) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Script
 # ---------------------------------------------------------------------------
+def armar_metricas(fila_g: pd.Series, ganador: str, cm: np.ndarray, costo_test: dict, contexto: dict) -> dict:
+    """Contenido de metrics.json: lo leen la API, la app, el monitoreo y el readme."""
+    oot = {k.removeprefix("oot_"): float(v) for k, v in fila_g.items() if str(k).startswith("oot_")}
+    return {
+        "modelo_ganador": ganador,
+        "criterio_seleccion": "mayor ROC-AUC medio en CV; desempate por PR-AUC y F1 en CV. Accuracy excluido por desbalance.",
+        "umbral_decision": float(fila_g["umbral"]),
+        "umbral_f1": float(fila_g["umbral_f1"]),
+        "nota_umbral": "Umbral operativo = minimo costo esperado sobre probabilidades out-of-fold del train "
+                       "(ver 'costos'). Metricas de decision de CV, test y out-of-time reportadas a este umbral. "
+                       "umbral_f1 queda como referencia.",
+        "costos": {
+            "supuestos": {k: v for k, v in COSTOS.items() if k != "nota"},
+            "test": costo_test,
+        },
+        "cv": {k: {"mean": float(fila_g[f"cv_{k}_mean"]), "std": float(fila_g[f"cv_{k}_std"])} for k in METRICAS},
+        "test": {k: float(fila_g[f"test_{k}"]) for k in METRICAS},
+        "out_of_time": oot,
+        "matriz_confusion_test": {"tn": int(cm[0, 0]), "fp": int(cm[0, 1]), "fn": int(cm[1, 0]), "tp": int(cm[1, 1])},
+        "nota_importancia": "Permutacion sobre test, analisis post-hoc; no participa de la seleccion.",
+        "random_state": RANDOM_STATE,
+        **contexto,
+    }
+
+
 def main() -> None:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    X, y = separar_target(cargar_datos())
+    crudo = cargar_datos()
+    df = filtrar_censura(crudo)
+    X, y = separar_target(df)
     X_train, X_test, y_train, y_test = dividir_train_test(X, y)
+    oot = dividir_temporal(X, y)
     ratio = float((y_train == 0).sum() / (y_train == 1).sum())
+    print(f"Censura: {len(crudo) - len(df):,} de {len(crudo):,} creditos excluidos (sin ventana de observacion)")
     print(f"Train {X_train.shape} | Test {X_test.shape} | mora train {y_train.mean():.2%} | ratio neg/pos {ratio:.1f}")
+    print(f"Out-of-time: historico {len(oot[0]):,} (mora {oot[2].mean():.2%}) | reciente {len(oot[1]):,} "
+          f"(mora {oot[3].mean():.2%}) desde {oot[1]['fecha_prestamo'].min():%Y-%m-%d}")
 
     cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
     filas, pipelines, probas, umbrales = [], {}, {}, {}
-    print(f"\nValidacion cruzada ({CV_FOLDS} folds) + evaluacion en test:")
+    print(f"\nValidacion cruzada ({CV_FOLDS} folds) + test + out-of-time:")
     for nombre, clf in definir_modelos(ratio).items():
-        fila, pipe, proba = evaluar_modelo(nombre, clf, X_train, y_train, X_test, y_test, cv)
+        fila, pipe, proba = evaluar_modelo(nombre, clf, X_train, y_train, X_test, y_test, cv, oot=oot)
         filas.append(fila)
         pipelines[nombre], probas[nombre], umbrales[nombre] = pipe, proba, fila["umbral"]
 
@@ -297,35 +420,37 @@ def main() -> None:
     pipe_g = pipelines[ganador]
     imp = importancia_variables(pipe_g, X_test, y_test)
     imp.to_csv(REPORTS_DIR / "importancia_variables.csv", index=False)
+    graficar_costo(y_test, probas[ganador], X_test["capital_prestado"], fila_g["umbral"], fila_g["umbral_f1"])
 
-    pred_g = (probas[ganador] >= umbrales[ganador]).astype(int)
-    cm = confusion_matrix(y_test, pred_g)
+    cm = confusion_matrix(y_test, (probas[ganador] >= umbrales[ganador]).astype(int))
+    costo_test = resumen_costo(y_test, probas[ganador], X_test["capital_prestado"], umbrales[ganador])
     features_modelo = list(pipe_g.named_steps["preprocesador"].transform(X_test.head(1)).columns)
-    metricas = {
-        "modelo_ganador": ganador,
-        "criterio_seleccion": "mayor ROC-AUC medio en CV; desempate por PR-AUC y F1 en CV. Accuracy excluido por desbalance.",
-        "umbral_decision": float(umbrales[ganador]),
-        "nota_umbral": "Elegido maximizando F1 sobre probabilidades out-of-fold del train; CV y test se reportan a este umbral.",
-        "cv": {k: {"mean": float(fila_g[f"cv_{k}_mean"]), "std": float(fila_g[f"cv_{k}_std"])} for k in METRICAS},
-        "test": {k: float(fila_g[f"test_{k}"]) for k in METRICAS},
-        "matriz_confusion_test": {"tn": int(cm[0, 0]), "fp": int(cm[0, 1]), "fn": int(cm[1, 0]), "tp": int(cm[1, 1])},
+    metricas = armar_metricas(fila_g, ganador, cm, costo_test, {
         "top_features": imp.head(10)["feature"].tolist(),
-        "nota_importancia": "Permutacion sobre test, analisis post-hoc; no participa de la seleccion.",
         "n_train": int(len(y_train)),
         "n_test": int(len(y_test)),
+        "n_excluidos_censura": int(len(crudo) - len(df)),
+        "n_oot": int(len(oot[1])),
         "tasa_mora_train": float(y_train.mean()),
         "features_modelo": features_modelo,
-        "random_state": RANDOM_STATE,
-    }
+    })
     (REPORTS_DIR / "metrics.json").write_text(json.dumps(metricas, indent=2, ensure_ascii=False), encoding="utf-8")
     (MODELS_DIR / "feature_names.json").write_text(json.dumps(features_modelo, indent=2, ensure_ascii=False), encoding="utf-8")
     joblib.dump(pipe_g, MODELS_DIR / "modelo_riesgo.joblib")
+    _imprimir_resumen(tabla, metricas)
 
+
+def _imprimir_resumen(tabla: pd.DataFrame, metricas: dict) -> None:
     print("\n=== Tabla comparativa ===")
-    cols = ["modelo", "cv_roc_auc_mean", "cv_pr_auc_mean", "cv_recall_mean", "cv_precision_mean", "cv_f1_mean",
-            "test_roc_auc", "test_pr_auc", "test_recall", "test_precision", "test_f1", "umbral"]
-    print(tabla[cols].round(3).to_string(index=False))
-    print(f"\nGanador: {ganador} | umbral {umbrales[ganador]:.2f} | matriz test tn={cm[0,0]} fp={cm[0,1]} fn={cm[1,0]} tp={cm[1,1]}")
+    cols = ["modelo", "cv_roc_auc_mean", "cv_pr_auc_mean", "cv_ks_mean", "test_roc_auc", "test_pr_auc", "test_ks",
+            "test_recall", "test_precision", "test_f1", "test_ahorro_pct", "test_tasa_rechazo",
+            "oot_roc_auc", "oot_pr_auc", "oot_ahorro_pct", "umbral", "umbral_f1"]
+    print(tabla[[c for c in cols if c in tabla.columns]].round(3).to_string(index=False))
+    cm, costo = metricas["matriz_confusion_test"], metricas["costos"]["test"]
+    print(f"\nGanador: {metricas['modelo_ganador']} | umbral {metricas['umbral_decision']:.2f} "
+          f"(F1: {metricas['umbral_f1']:.2f}) | matriz test tn={cm['tn']} fp={cm['fp']} fn={cm['fn']} tp={cm['tp']}")
+    print(f"Costo test: {costo['costo']:,.0f} vs {costo['costo_sin_modelo']:,.0f} sin modelo "
+          f"(ahorro {costo['ahorro_pct']:.1%}, rechazo {costo['tasa_rechazo']:.1%})")
     print("Top 10 features:", ", ".join(metricas["top_features"]))
     print(f"Modelo guardado en {MODELS_DIR / 'modelo_riesgo.joblib'} | reportes en {REPORTS_DIR}")
 

@@ -1,17 +1,28 @@
 """Pruebas de la API (model_deploy.py) y del contrato del pipeline (ft_engineering.py)."""
 
+import json
+
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
 import model_deploy
 from ft_engineering import COLUMNAS_REQUERIDAS, validar_esquema
-from model_deploy import EJEMPLO_SOLICITANTE, app
+from model_deploy import EJEMPLO_SOLICITANTE, METRICS_PATH, app
+
+CLAVE = "clave-de-prueba"
+HEADERS = {"X-API-Key": CLAVE}
+
+
+@pytest.fixture(autouse=True)
+def api_key(monkeypatch):
+    """La API lee la clave valida de la variable de entorno en cada request."""
+    monkeypatch.setenv(model_deploy.API_KEY_ENV, CLAVE)
 
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:  # el lifespan carga el modelo una vez por modulo
+    with TestClient(app, headers=HEADERS) as c:  # el lifespan carga el modelo una vez por modulo
         yield c
 
 
@@ -19,9 +30,15 @@ def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
     body = r.json()
+    ganador = json.loads(METRICS_PATH.read_text(encoding="utf-8"))["modelo_ganador"]
     assert body["status"] == "ok"
-    assert body["modelo"] == "Random Forest"
+    assert body["modelo"] == ganador
     assert 0 < body["umbral"] < 1
+
+
+@pytest.mark.usefixtures("client")
+def test_health_es_publico_sin_clave():
+    assert TestClient(app).get("/health").status_code == 200
 
 
 def test_model_info(client):
@@ -38,6 +55,30 @@ def test_predict_ok(client):
     assert body["clase"] in (0, 1)
     assert body["nivel"] in ("bajo", "medio", "alto")
     assert body["decision"] in ("aprobar", "revisar", "rechazar")
+
+
+@pytest.mark.usefixtures("client")
+@pytest.mark.parametrize("metodo, ruta, cuerpo", [
+    ("GET", "/model/info", None),
+    ("POST", "/predict", EJEMPLO_SOLICITANTE),
+    ("POST", "/predict/batch", {"solicitantes": [EJEMPLO_SOLICITANTE]}),
+])
+def test_endpoints_protegidos_sin_clave_401(metodo, ruta, cuerpo):
+    sin_clave = TestClient(app)  # sin "with": reutiliza el modelo ya cargado por el fixture del modulo
+    r = sin_clave.request(metodo, ruta, json=cuerpo)
+    assert r.status_code == 401
+
+
+def test_predict_clave_incorrecta_401(client):
+    r = client.post("/predict", json=EJEMPLO_SOLICITANTE, headers={"X-API-Key": "otra-clave"})
+    assert r.status_code == 401
+
+
+def test_servidor_sin_clave_configurada_503(client, monkeypatch):
+    monkeypatch.delenv(model_deploy.API_KEY_ENV)
+    r = client.post("/predict", json=EJEMPLO_SOLICITANTE)
+    assert r.status_code == 503
+    assert "API key" in r.json()["detail"]
 
 
 def test_predict_riesgo_alto_sube_probabilidad(client):
@@ -109,7 +150,7 @@ def test_modo_degradado_503_si_no_hay_modelo(monkeypatch, tmp_path):
     estado_previo = dict(model_deploy.ESTADO)  # el lifespan de este cliente vacia el estado compartido
     monkeypatch.setattr(model_deploy, "MODEL_PATH", tmp_path / "no_existe.joblib")
     try:
-        with TestClient(app) as c:
+        with TestClient(app, headers=HEADERS) as c:
             assert c.get("/health").status_code == 503
             assert c.get("/model/info").status_code == 503
             assert c.post("/predict", json=EJEMPLO_SOLICITANTE).status_code == 503

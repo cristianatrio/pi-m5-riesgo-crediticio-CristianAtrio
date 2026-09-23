@@ -44,6 +44,30 @@ def test_dividir_train_test_estratificado(datos):
     assert set(X_train.index).isdisjoint(X_test.index)
 
 
+def test_filtrar_censura_conserva_vencidos_y_observados():
+    df = pd.DataFrame({
+        "fecha_prestamo": pd.to_datetime(["2025-12-01", "2025-11-15", "2025-01-01"]),
+        "plazo_meses": [12, 1, 12],
+    })
+    filtrado = fe.filtrar_censura(df, meses_minimos=6, fecha_referencia="2026-01-01")
+    # 1 mes observado de 12 -> censurado; plazo 1 ya vencido -> entra; 12 meses observados -> entra
+    assert filtrado.index.tolist() == [1, 2]
+
+
+def test_filtrar_censura_por_defecto_excluye_los_mas_recientes(datos):
+    filtrado = fe.filtrar_censura(datos)
+    assert 0 < len(filtrado) < len(datos)
+    assert datos["fecha_prestamo"].idxmax() not in filtrado.index  # el ultimo desembolso aun no se observa
+
+
+def test_dividir_temporal_separa_pasado_y_reciente(datos):
+    X, y = fe.separar_target(datos)
+    x_hist, x_oot, y_hist, y_oot = fe.dividir_temporal(X, y, fraccion_oot=0.2)
+    assert x_hist["fecha_prestamo"].max() < x_oot["fecha_prestamo"].min()
+    assert len(x_oot) / len(X) == pytest.approx(0.2, abs=0.01)
+    assert len(y_hist) + len(y_oot) == len(y)
+
+
 def test_limpieza_convierte_valores_imposibles_en_nulos():
     crudo = pd.DataFrame([{c: 1 for c in fe.COLUMNAS_REQUERIDAS}] * 3)
     crudo["edad_cliente"] = [121, 40, 30]
