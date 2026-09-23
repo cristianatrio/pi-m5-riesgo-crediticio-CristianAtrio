@@ -92,7 +92,7 @@ def definir_modelos(ratio_desbalance: float) -> dict[str, object]:
     numpy 2.5 en Windows (access violation) y HistGradientBoosting cubre el mismo enfoque.
     """
     return {
-        "Dummy (siempre paga)": DummyClassifier(strategy="most_frequent"),
+        "Dummy (siempre paga)": DummyClassifier(strategy="most_frequent", random_state=RANDOM_STATE),
         "Regresion Logistica": LogisticRegression(
             C=0.5, class_weight="balanced", max_iter=2000, random_state=RANDOM_STATE
         ),

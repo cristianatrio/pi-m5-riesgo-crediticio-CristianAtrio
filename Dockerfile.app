@@ -13,8 +13,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-app.txt .
-RUN pip install --no-cache-dir -r requirements-app.txt
+# Lock con hashes (todas las dependencias transitivas verificadas) y solo wheels: no se ejecutan scripts de setup.
+COPY requirements-app.lock .
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes -r requirements-app.lock
+
 
 # La app necesita el historico (defaults del formulario y perfil de pagadores), el modelo,
 # las metricas, las importancias y los reportes de drift
