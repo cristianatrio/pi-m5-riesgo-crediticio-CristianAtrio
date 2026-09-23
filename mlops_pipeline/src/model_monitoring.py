@@ -271,7 +271,7 @@ def graficar(tabla: pd.DataFrame, referencia: pd.DataFrame, actual: pd.DataFrame
     top = [f for f in tabla["feature"].head(6) if f in COLS_NUMERICAS][:4]
     ref, act = normalizar_para_monitoreo(referencia), normalizar_para_monitoreo(actual)
     fig, axes = plt.subplots(1, len(top), figsize=(4.5 * len(top), 3.8))
-    for ax, col in zip(np.atleast_1d(axes), top):
+    for ax, col in zip(np.atleast_1d(axes), top, strict=True):
         tope = ref[col].quantile(0.99)
         sns.kdeplot(ref[col].clip(upper=tope).dropna(), ax=ax, label="referencia", fill=True, alpha=0.3)
         sns.kdeplot(act[col].clip(upper=tope).dropna(), ax=ax, label="actual", fill=True, alpha=0.3)
@@ -307,12 +307,23 @@ def reporte_markdown(rep: dict, tabla: pd.DataFrame) -> str:
     ]
     if rep.get("target"):
         t = rep["target"]
-        lineas += [f"- Tasa de mora: {t['tasa_mora_ref']:.2%} -> {t['tasa_mora_act']:.2%} ({t['diferencia_pp']:+.2f} pp). {t['nota']}", ""]
-    lineas += ["## Detalle por variable", "", "| Variable | Tipo | PSI | Nivel | Test | p-valor | Ref (mediana/moda) | Actual |", "|---|---|---|---|---|---|---|---|"]
+        lineas += [
+            f"- Tasa de mora: {t['tasa_mora_ref']:.2%} -> {t['tasa_mora_act']:.2%} ({t['diferencia_pp']:+.2f} pp). {t['nota']}",
+            "",
+        ]
+    lineas += [
+        "## Detalle por variable",
+        "",
+        "| Variable | Tipo | PSI | Nivel | Test | p-valor | Ref (mediana/moda) | Actual |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
     for _, r in tabla.iterrows():
         ref_v = f"{r['ref_mediana']:,.0f}" if r["tipo"] == "numerica" else r["ref_mediana"]
         act_v = f"{r['act_mediana']:,.0f}" if r["tipo"] == "numerica" else r["act_mediana"]
-        lineas.append(f"| {r['feature']} | {r['tipo']} | {r['psi']:.3f} | {icono[r['nivel']]} | {r['test']} | {r['p_valor']:.3g} | {ref_v} | {act_v} |")
+        lineas.append(
+            f"| {r['feature']} | {r['tipo']} | {r['psi']:.3f} | {icono[r['nivel']]} | {r['test']} "
+            f"| {r['p_valor']:.3g} | {ref_v} | {act_v} |"
+        )
     lineas += ["", "Figuras: " + ", ".join(f"`{f}`" for f in rep["figuras"]), ""]
     return "\n".join(lineas)
 
@@ -343,7 +354,8 @@ def imprimir_resumen(rep: dict) -> None:
     g, p = rep["resumen"], rep["prediccion"]
     print(f"\n[{rep['escenario']}] {g['estado']} | ref {rep['n_referencia']:,} vs act {rep['n_actual']:,}")
     print(f"  critico={g['n_critico']} {g['features_critico']} | alerta={g['n_alerta']} {g['features_alerta']} | ok={g['n_ok']}")
-    print(f"  prediccion: PSI {p['psi_probabilidad']:.3f} ({p['nivel']}), tasa riesgo {p['tasa_riesgo_ref']:.1%} -> {p['tasa_riesgo_act']:.1%}")
+    print(f"  prediccion: PSI {p['psi_probabilidad']:.3f} ({p['nivel']}), "
+          f"tasa riesgo {p['tasa_riesgo_ref']:.1%} -> {p['tasa_riesgo_act']:.1%}")
     if rep["target"]:
         t = rep["target"]
         print(f"  mora: {t['tasa_mora_ref']:.2%} -> {t['tasa_mora_act']:.2%} ({t['diferencia_pp']:+.2f} pp)")

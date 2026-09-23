@@ -42,14 +42,60 @@ jobs:
           print(f"OK: 50 predicciones, media {proba.mean():.3f}, umbral {umbral}")
           EOF
 
-      - name: Pruebas de la API y del contrato del pipeline
-        run: python -m pytest tests -q
+      - name: Estilo (ruff) - falla si hay issues
+        run: ruff check mlops_pipeline/src tests
+
+      - name: Seguridad (bandit) - falla con severidad media o alta
+        run: bandit -c pyproject.toml -r mlops_pipeline/src -ll
+
+      - name: Pruebas (API, pipeline, entrenamiento, monitoreo y app) con cobertura
+        run: python -m pytest tests --cov --cov-report=xml:coverage.xml --cov-report=term --junitxml=test-results.xml
+
+      - name: Reportes para SonarCloud (ruff y bandit sin cortar el pipeline)
+        if: always()
+        run: |
+          ruff check mlops_pipeline/src tests --output-format=concise --exit-zero > ruff-report.txt
+          bandit -c pyproject.toml -r mlops_pipeline/src -f json -o bandit-report.json --exit-zero
+
+      - name: Publicar reportes de calidad
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-calidad
+          path: |
+            coverage.xml
+            test-results.xml
+            ruff-report.txt
+            bandit-report.json
 
       - name: Publicar reportes de drift
         uses: actions/upload-artifact@v4
         with:
           name: reportes-drift
           path: mlops_pipeline/reports/drift/
+
+  sonarcloud:
+    runs-on: ubuntu-latest
+    needs: validar
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # historial completo: SonarCloud lo usa para blame y codigo nuevo
+
+      - name: Descargar reportes de cobertura, pruebas, ruff y bandit
+        uses: actions/download-artifact@v4
+        with:
+          name: reportes-calidad
+
+      - name: Analisis SonarCloud (calidad, seguridad, cobertura y estilo)
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v8
+
+      - name: Aviso si falta el token
+        if: env.SONAR_TOKEN == ''
+        run: echo "::warning::SONAR_TOKEN no configurado; se omite el analisis de SonarCloud (ver readme, seccion Extra credit)."
 
   docker:
     runs-on: ubuntu-latest
