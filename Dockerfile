@@ -14,9 +14,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Dependencias primero: capa cacheable, no se reinstala si solo cambia el codigo
-COPY requirements-api.txt .
-RUN pip install --no-cache-dir -r requirements-api.txt
+# Dependencias primero: capa cacheable, no se reinstala si solo cambia el codigo.
+# Lock con hashes (todas las dependencias transitivas verificadas) y solo wheels: no se ejecutan scripts de setup.
+COPY requirements-api.lock .
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes -r requirements-api.lock
 
 # Codigo y artefactos, solo lo necesario para inferencia
 COPY mlops_pipeline/src/ft_engineering.py mlops_pipeline/src/model_deploy.py mlops_pipeline/src/config.json mlops_pipeline/src/

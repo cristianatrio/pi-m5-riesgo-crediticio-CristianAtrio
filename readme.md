@@ -367,7 +367,9 @@ como job `sonarcloud` del CI (despues de `validar`). Cubre los cuatro ejes pedid
 | Integridad y estilo | Convenciones PEP 8, imports ordenados, bugs comunes (bugbear), sintaxis moderna | `ruff-report.txt` importado como issues externos |
 
 Configuracion: `sonar-project.properties` (fuentes, tests, exclusiones y rutas de reportes) y `pyproject.toml`
-(reglas de ruff, cobertura con rutas relativas, bandit). El CI ademas **corta el pipeline** si ruff encuentra un
+(reglas de ruff, cobertura con rutas relativas, bandit). Las dependencias del CI y de las imagenes se instalan desde
+lock files con hashes (`requirements*.lock`, generados con `uv pip compile --universal --generate-hashes` a partir de
+los `requirements*.txt`) y solo desde wheels (`--only-binary :all:`): versiones transitivas fijas y sin scripts de setup. El CI ademas **corta el pipeline** si ruff encuentra un
 issue o bandit uno de severidad media o alta; SonarCloud aplica la quality gate (por defecto: 80% de cobertura en
 codigo nuevo, sin bugs ni vulnerabilidades nuevas, hotspots revisados).
 
