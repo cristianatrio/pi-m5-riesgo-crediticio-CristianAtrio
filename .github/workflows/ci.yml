@@ -18,7 +18,8 @@ jobs:
           cache: pip
 
       - name: Instalar dependencias
-        run: pip install -r requirements.txt
+        # requirements.lock: versiones y hashes de todas las dependencias (generado desde requirements.txt con uv)
+        run: "pip install --only-binary :all: --require-hashes -r requirements.lock"
 
       - name: Compilar scripts
         run: python -m py_compile mlops_pipeline/src/*.py
@@ -91,7 +92,8 @@ jobs:
 
       - name: Analisis SonarCloud (calidad, seguridad, cobertura y estilo)
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarqube-scan-action@v8
+        # Fijada por SHA (no por tag, que es mutable): evita que un cambio en la action ejecute codigo no revisado
+        uses: SonarSource/sonarqube-scan-action@ba9859eae8dd6bd29e412f25ddbbef3d032000f4 # v8.2.2
 
       - name: Aviso si falta el token
         if: env.SONAR_TOKEN == ''
