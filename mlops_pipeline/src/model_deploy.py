@@ -33,7 +33,7 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ft_engineering import COLUMNAS_REQUERIDAS, CONFIG, MODELS_DIR, RAIZ, validar_esquema  # noqa: E402
+from ft_engineering import COLUMNAS_REQUERIDAS, MODELS_DIR, RAIZ, validar_esquema  # noqa: E402
 
 VERSION_API = "1.3.0"
 MAX_BATCH = 1000

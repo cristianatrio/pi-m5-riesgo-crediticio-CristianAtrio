@@ -1,16 +1,12 @@
 """Pruebas de la API (model_deploy.py) y del contrato del pipeline (ft_engineering.py)."""
 
-import sys
-from pathlib import Path
-
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "mlops_pipeline" / "src"))
-
-from ft_engineering import COLUMNAS_REQUERIDAS, validar_esquema  # noqa: E402
-from model_deploy import EJEMPLO_SOLICITANTE, app  # noqa: E402
+import model_deploy
+from ft_engineering import COLUMNAS_REQUERIDAS, validar_esquema
+from model_deploy import EJEMPLO_SOLICITANTE, app
 
 
 @pytest.fixture(scope="module")
@@ -78,6 +74,41 @@ def test_predict_batch(client):
 
 def test_predict_batch_vacio_422(client):
     assert client.post("/predict/batch", json={"solicitantes": []}).status_code == 422
+
+
+def test_raiz_apunta_a_docs(client):
+    assert client.get("/").json()["docs"] == "/docs"
+
+
+def test_error_de_datos_del_pipeline_400(client, monkeypatch):
+    def rechaza(_df):
+        raise ValueError("columna rota")
+
+    monkeypatch.setattr(model_deploy, "validar_esquema", rechaza)
+    r = client.post("/predict", json=EJEMPLO_SOLICITANTE)
+    assert r.status_code == 400 and "columna rota" in r.json()["detail"]
+
+
+def test_fallo_de_inferencia_500_sin_traza(client, monkeypatch):
+    class ModeloRoto:
+        def predict_proba(self, _X):
+            raise RuntimeError("detalle interno que no debe filtrarse")
+
+    monkeypatch.setitem(model_deploy.ESTADO, "modelo", ModeloRoto())
+    r = client.post("/predict", json=EJEMPLO_SOLICITANTE)
+    assert r.status_code == 500 and "detalle interno" not in r.text
+
+
+def test_modo_degradado_503_si_no_hay_modelo(monkeypatch, tmp_path):
+    estado_previo = dict(model_deploy.ESTADO)  # el lifespan de este cliente vacia el estado compartido
+    monkeypatch.setattr(model_deploy, "MODEL_PATH", tmp_path / "no_existe.joblib")
+    try:
+        with TestClient(app) as c:
+            assert c.get("/health").status_code == 503
+            assert c.get("/model/info").status_code == 503
+            assert c.post("/predict", json=EJEMPLO_SOLICITANTE).status_code == 503
+    finally:
+        model_deploy.ESTADO.update(estado_previo)
 
 
 def test_validar_esquema_detecta_faltantes():

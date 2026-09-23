@@ -1,0 +1,28 @@
+# Configuracion de herramientas de calidad (no es un paquete instalable).
+# ruff: estilo y bugs comunes | pytest + coverage: pruebas y cobertura | bandit: seguridad.
+# El CI genera los reportes y SonarCloud los importa (ver sonar-project.properties).
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+src = ["mlops_pipeline/src", "tests"]
+extend-exclude = ["*.ipynb", "*-venv"]
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I isort, B bugbear, UP pyupgrade, SIM simplificaciones
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["mlops_pipeline/src"]
+relative_files = true  # rutas relativas en coverage.xml: SonarCloud las resuelve contra la raiz del repo
+
+[tool.coverage.report]
+exclude_also = ["if __name__ == .__main__.:"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "pim5_riesgo_crediticio-venv"]
