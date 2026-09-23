@@ -68,7 +68,8 @@ def test_evaluar_modelo_devuelve_cv_y_test(muestra):
 
     fila, pipe, proba = mte.evaluar_modelo("Regresion Logistica", clf, X_train, y_train, X_test, y_test, cv)
 
-    assert proba.shape == (len(X_test),) and ((proba >= 0) & (proba <= 1)).all()
+    assert proba.shape == (len(X_test),)
+    assert ((proba >= 0) & (proba <= 1)).all()
     assert {f"cv_{k}_mean" for k in mte.METRICAS} <= set(fila)
     assert {f"test_{k}" for k in mte.METRICAS} <= set(fila)
     assert 0 < fila["umbral"] < 1
