@@ -2,18 +2,23 @@
 API REST del modelo de riesgo crediticio (PI M5) con FastAPI.
 
 Expone el pipeline serializado ``mlops_pipeline/models/modelo_riesgo.joblib`` (preprocesador
-+ Random Forest). La API recibe las 20 variables crudas del solicitante; toda la limpieza,
++ modelo ganador). La API recibe las 20 variables crudas del solicitante; toda la limpieza,
 imputacion y feature engineering ocurre dentro del pipeline.
 
-Endpoints:
-- GET  /health         estado del servicio y del modelo (lo usa el HEALTHCHECK de Docker)
-- GET  /model/info     metricas, umbral, features y columnas requeridas
-- POST /predict        un solicitante -> probabilidad de mora, clase, nivel y decision
-- POST /predict/batch  hasta 1.000 solicitantes -> predicciones + resumen
-- GET  /docs           Swagger UI con el ejemplo listo para probar
+Endpoints (los marcados con * exigen el header ``X-API-Key``):
+- GET  /health           estado del servicio y del modelo (publico: lo usa el HEALTHCHECK de Docker)
+- GET  /model/info     * metricas, umbral, features y columnas requeridas
+- POST /predict        * un solicitante -> probabilidad de mora, clase, nivel y decision
+- POST /predict/batch  * hasta 1.000 solicitantes -> predicciones + resumen
+- GET  /docs             Swagger UI (boton "Authorize" para cargar la clave)
+
+Autenticacion: la clave valida se lee de la variable de entorno ``API_KEY``. Si el servidor no
+la tiene configurada, los endpoints protegidos responden 503 (falla cerrada: nunca quedan
+abiertos por olvido de configuracion).
 
 Uso local::
 
+    set API_KEY=mi-clave-local        (PowerShell: $env:API_KEY = "mi-clave-local")
     uvicorn model_deploy:app --app-dir mlops_pipeline/src --reload --port 8000
 """
 
@@ -21,21 +26,27 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import secrets
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ft_engineering import COLUMNAS_REQUERIDAS, MODELS_DIR, RAIZ, validar_esquema  # noqa: E402
 
-VERSION_API = "1.3.0"
+VERSION_API = "1.5.0"
+API_KEY_ENV = "API_KEY"
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False,
+                              description="Clave de acceso. El servidor la lee de la variable de entorno API_KEY.")
 MAX_BATCH = 1000
 MODEL_PATH = MODELS_DIR / "modelo_riesgo.joblib"
 METRICS_PATH = RAIZ / "mlops_pipeline" / "reports" / "metrics.json"
@@ -152,10 +163,24 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="API de riesgo crediticio - PI M5",
     version=VERSION_API,
-    description="Probabilidad de mora de un solicitante de credito. Modelo Random Forest con pipeline de "
-                "feature engineering embebido; recibe datos crudos.",
+    description="Probabilidad de mora de un solicitante de credito. Pipeline de feature engineering embebido; "
+                "recibe datos crudos. Los endpoints de prediccion e informacion del modelo exigen el header X-API-Key.",
     lifespan=lifespan,
 )
+
+
+def verificar_api_key(clave: Annotated[str | None, Security(API_KEY_HEADER)] = None) -> None:
+    """Compara la clave recibida con la del servidor en tiempo constante (evita ataques de timing)."""
+    esperada = os.environ.get(API_KEY_ENV)
+    if not esperada:
+        logger.error("Variable %s sin configurar: se rechazan las solicitudes protegidas", API_KEY_ENV)
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Servicio sin API key configurada")
+    if not clave or not secrets.compare_digest(clave.encode(), esperada.encode()):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API key invalida o ausente",
+                            headers={"WWW-Authenticate": "API-Key"})
+
+
+PROTEGIDO = [Depends(verificar_api_key)]
 
 
 def modelo_o_503():
@@ -200,7 +225,7 @@ def health():
     return Health(status="ok", modelo=ESTADO["metricas"]["modelo_ganador"], version_api=VERSION_API, umbral=ESTADO["umbral"])
 
 
-@app.get("/model/info", response_model=InfoModelo, tags=["servicio"])
+@app.get("/model/info", response_model=InfoModelo, tags=["servicio"], dependencies=PROTEGIDO)
 def model_info():
     modelo_o_503()
     m = ESTADO["metricas"]
@@ -212,13 +237,13 @@ def model_info():
     )
 
 
-@app.post("/predict", response_model=Prediccion, tags=["prediccion"])
+@app.post("/predict", response_model=Prediccion, tags=["prediccion"], dependencies=PROTEGIDO)
 def predict(solicitante: Solicitante):
     df = pd.DataFrame([solicitante.model_dump()])
     return a_prediccion(predecir_df(df)[0])
 
 
-@app.post("/predict/batch", response_model=RespuestaLote, tags=["prediccion"])
+@app.post("/predict/batch", response_model=RespuestaLote, tags=["prediccion"], dependencies=PROTEGIDO)
 def predict_batch(lote: LoteSolicitantes):
     df = pd.DataFrame([s.model_dump() for s in lote.solicitantes])
     probas = predecir_df(df)

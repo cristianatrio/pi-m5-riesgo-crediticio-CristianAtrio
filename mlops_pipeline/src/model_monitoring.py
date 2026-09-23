@@ -56,6 +56,7 @@ from ft_engineering import (  # noqa: E402
     TARGET,
     cargar_datos,
     dividir_train_test,
+    filtrar_censura,
     separar_target,
     validar_esquema,
 )
@@ -144,8 +145,8 @@ def normalizar_para_monitoreo(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def datos_referencia() -> pd.DataFrame:
-    """Train del split oficial, con target incluido para el drift de mora."""
-    df = cargar_datos()
+    """Train del split oficial (mismo filtro de censura que el entrenamiento), con target para el drift de mora."""
+    df = filtrar_censura(cargar_datos())
     X, y = separar_target(df)
     X_train, _, y_train, _ = dividir_train_test(X, y)
     return X_train.assign(**{TARGET: 1 - y_train})

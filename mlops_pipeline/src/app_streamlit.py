@@ -313,7 +313,7 @@ def panel_resultado(res: dict, umbral: float, proba_media: float, mediana_pagado
     m1.metric("Probabilidad de mora", f"{proba:.1%}")
     m2.metric("Vs. solicitante promedio", f"{(proba - proba_media) * 100:+.1f} pp", f"promedio {proba_media:.1%}", delta_color="off")
     m3.metric("Umbral aplicado", f"{umbral:.2f}",
-              "optimizado por F1" if abs(umbral - res["umbral_modelo"]) < 1e-9 else "ajustado manualmente", delta_color="off")
+              "minimo costo esperado" if abs(umbral - res["umbral_modelo"]) < 1e-9 else "ajustado manualmente", delta_color="off")
 
     st.markdown(
         f'<div class="banner" style="background:{p[color]}">{etiqueta} &middot; probabilidad de mora {proba:.1%}'
@@ -348,8 +348,9 @@ def panel_resultado(res: dict, umbral: float, proba_media: float, mediana_pagado
 def tab_prediccion(modelo, df_hist, mediana_pagadores, proba_media, umbral_modelo, tasa_mora, tema):
     solicitante, enviado = formulario_solicitante(df_hist)
     u1, u2 = st.columns([2, 1], vertical_alignment="center")
-    umbral = u1.slider("Umbral de decision", 0.05, 0.95, umbral_modelo, 0.01,
-                       help="Por defecto el umbral optimizado por F1 en entrenamiento. Bajarlo detecta mas moras a costa de mas rechazos.")
+    umbral = u1.slider("Umbral de decision", 0.01, 0.99, umbral_modelo, 0.01,
+                       help="Por defecto el umbral de minimo costo esperado (perdida por mora vs. margen perdido). "
+                            "Bajarlo detecta mas moras a costa de mas rechazos.")
     u2.markdown(f'<div class="subtle">Umbral del modelo: <b>{umbral_modelo:.2f}</b>. Se aplica sobre la ultima evaluacion.</div>',
                 unsafe_allow_html=True)
     if enviado:

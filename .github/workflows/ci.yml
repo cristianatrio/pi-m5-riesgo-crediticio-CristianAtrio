@@ -113,13 +113,18 @@ jobs:
 
       - name: Levantar el contenedor y probar los endpoints
         run: |
-          docker run -d --name riesgo-api -p 8000:8000 riesgo-api:ci
+          API_KEY=$(openssl rand -hex 16)  # clave efimera: solo vive en este job
+          docker run -d --name riesgo-api -p 8000:8000 -e API_KEY="$API_KEY" riesgo-api:ci
           for i in $(seq 1 30); do
             curl -fsS http://localhost:8000/health && break
             sleep 2
           done
           echo
-          curl -fsS -X POST http://localhost:8000/predict -H "Content-Type: application/json"             -d '{"tipo_credito":4,"capital_prestado":1921920,"plazo_meses":10,"edad_cliente":42,"tipo_laboral":"Empleado","salario_cliente":3000000,"total_otros_prestamos":1000000,"cuota_pactada":182863,"puntaje_datacredito":791,"cant_creditosvigentes":5,"huella_consulta":4,"saldo_mora":0,"saldo_total":16178,"saldo_principal":14442,"saldo_mora_codeudor":0,"creditos_sectorFinanciero":2,"creditos_sectorCooperativo":0,"creditos_sectorReal":1,"promedio_ingresos_datacredito":1204496,"tendencia_ingresos":"Creciente"}'
+          CUERPO='{"tipo_credito":4,"capital_prestado":1921920,"plazo_meses":10,"edad_cliente":42,"tipo_laboral":"Empleado","salario_cliente":3000000,"total_otros_prestamos":1000000,"cuota_pactada":182863,"puntaje_datacredito":791,"cant_creditosvigentes":5,"huella_consulta":4,"saldo_mora":0,"saldo_total":16178,"saldo_principal":14442,"saldo_mora_codeudor":0,"creditos_sectorFinanciero":2,"creditos_sectorCooperativo":0,"creditos_sectorReal":1,"promedio_ingresos_datacredito":1204496,"tendencia_ingresos":"Creciente"}'
+          CODIGO=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d "$CUERPO")
+          echo "Sin API key -> HTTP $CODIGO (se espera 401)"
+          test "$CODIGO" = "401"
+          curl -fsS -X POST http://localhost:8000/predict -H "Content-Type: application/json" -H "X-API-Key: $API_KEY" -d "$CUERPO"
           echo
           docker image ls riesgo-api:ci --format "Imagen: {{.Repository}}:{{.Tag}} {{.Size}}"
 
