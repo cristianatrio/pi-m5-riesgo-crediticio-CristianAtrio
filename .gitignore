@@ -13,6 +13,13 @@ __pycache__/
 coverage.xml
 htmlcov/
 
+# --- Reportes de calidad generados por el CI (SonarCloud) ---
+test-results.xml
+ruff-report.txt
+bandit-report.json
+.ruff_cache/
+.scannerwork/
+
 # --- Jupyter ---
 .ipynb_checkpoints/
 

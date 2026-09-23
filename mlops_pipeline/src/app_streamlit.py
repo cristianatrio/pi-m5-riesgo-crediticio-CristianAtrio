@@ -129,7 +129,9 @@ def aplicar_css(tema: str) -> None:
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: .9rem 1.1rem; box-shadow: var(--shadow);
 }}
-[data-testid="stMetricLabel"] p {{ color: var(--muted) !important; font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; }}
+[data-testid="stMetricLabel"] p {{
+  color: var(--muted) !important; font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .03em;
+}}
 [data-testid="stMetricValue"] {{ color: var(--text); font-weight: 700; }}
 /* Alertas y dataframes */
 [data-testid="stAlert"] {{ border-radius: 12px; }}
@@ -139,7 +141,9 @@ def aplicar_css(tema: str) -> None:
 .banner small {{ display: block; font-weight: 500; font-size: .9rem; opacity: .9; margin-top: .25rem; color: #fff; }}
 .gauge {{ position: relative; height: 14px; border-radius: 999px; margin: 1.6rem 0 .4rem 0;
   background: linear-gradient(90deg, var(--ok) 0%, var(--warn) 50%, var(--danger) 100%); }}
-.gauge .marker {{ position: absolute; top: -7px; width: 4px; height: 28px; background: var(--text); border-radius: 2px; transform: translateX(-2px); }}
+.gauge .marker {{
+  position: absolute; top: -7px; width: 4px; height: 28px; background: var(--text); border-radius: 2px; transform: translateX(-2px);
+}}
 .gauge .umbral {{ position: absolute; top: -12px; width: 0; height: 38px; border-left: 2px dashed var(--muted); }}
 .gauge .lbl {{ position: absolute; top: -32px; transform: translateX(-50%); font-size: .75rem; color: var(--muted); white-space: nowrap; }}
 .subtle {{ color: var(--muted); font-size: .85rem; }}
@@ -247,14 +251,17 @@ def formulario_solicitante(df_hist: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
             st.markdown("#### Credito solicitado")
             tipo_credito = st.selectbox("Tipo de credito", [4, 9, 10, 6], format_func=lambda v: f"Producto {v}")
             capital = st.number_input("Capital solicitado", 100_000, 100_000_000, int(med["capital_prestado"]), step=100_000)
-            plazo = st.select_slider("Plazo (meses)", options=sorted(df_hist["plazo_meses"].unique().tolist()), value=int(med["plazo_meses"]))
+            plazos = sorted(df_hist["plazo_meses"].unique().tolist())
+            plazo = st.select_slider("Plazo (meses)", options=plazos, value=int(med["plazo_meses"]))
             cuota = st.number_input("Cuota pactada", 10_000, 10_000_000, int(med["cuota_pactada"]), step=10_000)
         with c3, st.container(border=True):
             st.markdown("#### Central de riesgo")
             score = st.slider("Puntaje Datacredito", 150, 950, int(med["puntaje_datacredito"]))
             huella = st.slider("Consultas recientes (huella)", 0, 30, int(med["huella_consulta"]))
             vigentes = st.slider("Creditos vigentes", 0, 60, int(med["cant_creditosvigentes"]))
-            ingresos_central = st.number_input("Ingreso promedio estimado", 0, 100_000_000, int(med["promedio_ingresos_datacredito"]), step=100_000)
+            ingresos_central = st.number_input(
+                "Ingreso promedio estimado", 0, 100_000_000, int(med["promedio_ingresos_datacredito"]), step=100_000
+            )
             tendencia = st.selectbox("Tendencia de ingresos", TENDENCIAS, index=0)
             sin_ingreso_central = st.checkbox("La central no tiene estimacion de ingresos")
         with st.expander("Saldos y creditos por sector (avanzado)"):
@@ -370,7 +377,8 @@ def tab_explicacion(tema: str):
     with c2, st.container(border=True):
         st.markdown("#### Lectura de negocio")
         st.markdown(
-            "- **puntaje_datacredito** y **huella_consulta** explican la mayor parte: score bajo y muchas consultas recientes elevan la mora.\n"
+            "- **puntaje_datacredito** y **huella_consulta** explican la mayor parte: "
+            "score bajo y muchas consultas recientes elevan la mora.\n"
             "- **plazo_meses** / **plazo_largo**: creditos a 24-36 meses triplican la mora de los de 9-12.\n"
             "- **edad_cliente**: los menores de 31 duplican la mora de los de 40-55.\n"
             "- **ratio_deuda_salario** y **promedio_ingresos_datacredito**: capacidad de pago e historial en la central.\n"

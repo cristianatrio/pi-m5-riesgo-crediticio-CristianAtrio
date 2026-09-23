@@ -1,5 +1,7 @@
 # PI M5 - Modelo predictivo de riesgo crediticio
 
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio&metric=coverage)](https://sonarcloud.io/summary/new_code?id=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio) [![Security](https://sonarcloud.io/api/project_badges/measure?project=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio) [![Reliability](https://sonarcloud.io/api/project_badges/measure?project=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio) [![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio) [![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio)
+
 Proyecto Integrador del Modulo 5 (Data Science, Henry). Modelo de machine learning
 que anticipa si un nuevo solicitante de credito pagara a tiempo, desplegado como API
 (FastAPI + Docker) con monitoreo de data drift y una app Streamlit.
@@ -19,8 +21,8 @@ Resultado: el modelo detecta el 31% de las moras marcando el 8% de las solicitud
 triplica el azar. Las variables que mas pesan son el score de la central, las consultas recientes, el plazo
 y la edad. Un score interno (`puntaje`) fue descartado por contener el resultado.
 
-> Estado actual: **V1.3.0** - API REST con FastAPI (`model_deploy.py`), imagen Docker y pruebas
-> automatizadas. Los 4 avances completos. Modelo en produccion: **Random Forest**, ROC-AUC 0,70 en test.
+> Estado actual: **V1.4.0** - los 4 avances completos + extra credit: analisis continuo en SonarCloud (calidad,
+> seguridad, cobertura 99% con 60 pruebas y estilo con ruff / bandit). Modelo en produccion: **Random Forest**, ROC-AUC 0,70 en test.
 
 ## Estructura del repositorio (no modificar: los pipelines de Jenkins dependen de ella)
 
@@ -31,9 +33,8 @@ mlops_pipeline/
 │   ├── comprension_eda.ipynb
 │   ├── ft_engineering.py
 │   ├── model_training_evaluation.py
-│   ├── model_deploy.py
-│   ├── model_monitoring.py
 │   ├── model_deploy.py        # API FastAPI: /health, /model/info, /predict, /predict/batch
+│   ├── model_monitoring.py    # data drift: PSI, KS, chi-cuadrado, drift de prediccion
 │   ├── app_streamlit.py       # app de prediccion, explicacion, lote y monitoreo
 │   └── config.json            # parametros del proyecto (target, exclusiones, rangos, seed, umbrales de drift)
 ├── models/                    # modelo_riesgo.joblib (preprocesador + modelo), feature_names.json
@@ -42,7 +43,9 @@ mlops_pipeline/
 │   └── drift/                 # reportes de drift (json, md, csv) y figuras PSI por escenario
 └── data/                      # splits transformados (parquet, ignorados por git)
 .github/workflows/ci.yml       # CI: compila, feature engineering, monitoreo, pytest, build y prueba de la imagen Docker
-tests/test_api.py              # pruebas de la API y del contrato del pipeline (pytest)
+tests/                         # 60 pruebas pytest: API, feature engineering, entrenamiento, monitoreo y app Streamlit
+sonar-project.properties       # configuracion de SonarCloud (extra credit)
+pyproject.toml                 # configuracion de ruff, pytest, coverage y bandit
 Dockerfile                     # imagen de la API (python:3.12-slim, usuario no root, healthcheck)
 Dockerfile.app                 # imagen de la app Streamlit (opcional)
 docker-compose.yml             # api + app como dos servicios
@@ -72,6 +75,8 @@ readme.md
 | V1.1.0 | Ingenieria de caracteristicas + entrenamiento, evaluacion y seleccion de modelos |
 | V1.2.0 | Monitoreo de data drift, app Streamlit, CI con GitHub Actions |
 | V1.3.0 | API FastAPI, Dockerfile, pruebas con pytest, CI con build de la imagen |
+| V1.3.1 | App Streamlit en Docker y `docker-compose` con API + app |
+| V1.4.0 | Extra credit: SonarCloud, pruebas de todos los modulos (cobertura 99%), ruff y bandit en el CI |
 
 ## Setup local
 
@@ -275,8 +280,10 @@ Campo faltante -> `HTTP 422` con el detalle de Pydantic. Lote de 2 solicitantes:
 
 ### Pruebas (`tests/test_api.py`)
 
-11 pruebas con `TestClient`: health, info, prediccion, monotonicidad (perfil peor -> mayor probabilidad),
-422 por campo faltante / extra / valor invalido, nulos de la central, batch, batch vacio y contrato de esquema.
+15 pruebas con `TestClient`: health, info, prediccion, monotonicidad (perfil peor -> mayor probabilidad),
+422 por campo faltante / extra / valor invalido, nulos de la central, batch, batch vacio, contrato de esquema,
+400 (datos rechazados por el pipeline), 500 sin filtrar la traza y modo degradado 503 si falta el modelo.
+El resto de la suite (60 pruebas en total) se describe en la seccion Extra credit.
 
 ```bash
 python -m pytest tests -q
@@ -346,3 +353,50 @@ Resultado local: ambos contenedores `Up (healthy)`, API y app respondiendo 200. 
 2. En el servidor: `docker compose up -d --build` (API + app) o solo `docker build` / `docker run` de la API, con el tag de la version.
 3. Operacion: `/health` para el balanceador, `model_monitoring.py --nuevos ventana.csv --strict` como job periodico
    sobre las solicitudes recibidas; si detecta drift, reentrenar con `model_training_evaluation.py` y reconstruir la imagen.
+
+## Extra credit - SonarCloud
+
+Analisis continuo en [SonarCloud](https://sonarcloud.io/summary/new_code?id=cristianatrio_pi-m5-riesgo-crediticio-CristianAtrio) en cada push y PR,
+como job `sonarcloud` del CI (despues de `validar`). Cubre los cuatro ejes pedidos:
+
+| Eje | Como se mide | Herramienta / reporte |
+|---|---|---|
+| Calidad del codigo (mantenibilidad) | Code smells, complejidad cognitiva, duplicacion, deuda tecnica | Analizador Python de SonarCloud |
+| Seguridad | Vulnerabilidades y security hotspots (Python, Dockerfiles, docker-compose, workflows de GitHub Actions) + reporte de bandit importado | SonarCloud + `bandit-report.json` |
+| Cobertura de pruebas | % de lineas y ramas cubiertas por pytest | `coverage.xml` (pytest-cov, Cobertura) + `test-results.xml` |
+| Integridad y estilo | Convenciones PEP 8, imports ordenados, bugs comunes (bugbear), sintaxis moderna | `ruff-report.txt` importado como issues externos |
+
+Configuracion: `sonar-project.properties` (fuentes, tests, exclusiones y rutas de reportes) y `pyproject.toml`
+(reglas de ruff, cobertura con rutas relativas, bandit). El CI ademas **corta el pipeline** si ruff encuentra un
+issue o bandit uno de severidad media o alta; SonarCloud aplica la quality gate (por defecto: 80% de cobertura en
+codigo nuevo, sin bugs ni vulnerabilidades nuevas, hotspots revisados).
+
+### Pruebas (`tests/`, 60 pruebas, cobertura 99%)
+
+| Archivo | Que valida |
+|---|---|
+| `test_api.py` | Endpoints, validacion 422, errores 400 / 500 / 503 |
+| `test_ft_engineering.py` | Limpieza de valores imposibles, ratios y flags, split estratificado, pipeline sin nulos ni columnas con fuga, `main()` |
+| `test_model_training_evaluation.py` | Umbral optimo F1, metricas con valores conocidos, seleccion del ganador (ignora Dummy, desempates), `main()` completo con modelos rapidos en carpetas temporales |
+| `test_model_monitoring.py` | PSI numerico / categorico, KS, chi-cuadrado, semaforo, reglas de alerta global, reportes, `--strict`, `--nuevos` y autotest del detector |
+| `test_app_streamlit.py` | La app completa con `streamlit.testing.AppTest` (4 pestanas, formulario, modo oscuro) y la pestana de lote |
+
+Local (mismo comando que el CI):
+
+```bash
+python -m pytest tests --cov --cov-report=term
+ruff check mlops_pipeline/src tests
+bandit -c pyproject.toml -r mlops_pipeline/src -ll
+```
+
+Resultado local: 60 pruebas OK, cobertura 99% (848 sentencias, 3 sin cubrir), ruff sin issues, bandit sin hallazgos.
+
+### Activacion (una sola vez)
+
+1. Entrar a [sonarcloud.io](https://sonarcloud.io) con GitHub, importar la organizacion `cristianatrio` y el repositorio.
+2. En el proyecto: *Administration -> Analysis Method* -> desactivar **Automatic Analysis** (el analisis lo hace el CI).
+3. *My Account -> Security* -> generar un token y guardarlo como secret del repo: `gh secret set SONAR_TOKEN`.
+4. Si SonarCloud asigna otra `organization` o `projectKey`, actualizarlas en `sonar-project.properties`.
+
+Sin el secret, el job `sonarcloud` deja un aviso y no falla, para no bloquear el resto del pipeline.
+

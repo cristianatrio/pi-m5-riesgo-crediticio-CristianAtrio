@@ -42,6 +42,7 @@ import pandas as pd
 matplotlib.use("Agg")  # sin ventanas: el script corre en CI / consola
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.base import clone
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.inspection import permutation_importance
@@ -57,7 +58,6 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.base import clone
 from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
@@ -232,7 +232,7 @@ def graficar_curvas(y_test, probas: dict[str, np.ndarray]) -> None:
 def graficar_matrices(y_test, probas: dict[str, np.ndarray], umbrales: dict[str, float]) -> None:
     nombres = [n for n in probas if not n.startswith("Dummy")]
     fig, axes = plt.subplots(1, len(nombres), figsize=(3.6 * len(nombres), 3.8))
-    for ax, nombre in zip(np.atleast_1d(axes), nombres):
+    for ax, nombre in zip(np.atleast_1d(axes), nombres, strict=True):
         pred = (probas[nombre] >= umbrales[nombre]).astype(int)
         ConfusionMatrixDisplay(confusion_matrix(y_test, pred), display_labels=["paga", "mora"]).plot(
             ax=ax, colorbar=False, cmap="Blues"
