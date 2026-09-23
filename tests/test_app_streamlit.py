@@ -58,7 +58,8 @@ def test_tab_lote_predice_y_ofrece_descarga(monkeypatch, datos, modelo):
     descargas = []
     monkeypatch.setattr(app.st, "download_button", lambda *a, **k: descargas.append(a))
     app.tab_lote(modelo, umbral_modelo=0.5)
-    assert descargas and b"probabilidad_mora" in descargas[0][1]
+    assert descargas
+    assert b"probabilidad_mora" in descargas[0][1]
 
 
 def test_tab_lote_esquema_invalido_muestra_error(monkeypatch, datos, modelo):
@@ -66,7 +67,8 @@ def test_tab_lote_esquema_invalido_muestra_error(monkeypatch, datos, modelo):
     errores = []
     monkeypatch.setattr(app.st, "error", errores.append)
     app.tab_lote(modelo, umbral_modelo=0.5)
-    assert errores and "huella_consulta" in errores[0]
+    assert errores
+    assert "huella_consulta" in errores[0]
 
 
 def test_tab_monitoreo_sin_reportes_avisa(monkeypatch):
@@ -74,4 +76,5 @@ def test_tab_monitoreo_sin_reportes_avisa(monkeypatch):
     monkeypatch.setattr(app, "cargar_drift", dict)
     monkeypatch.setattr(app.st, "warning", avisos.append)
     app.tab_monitoreo("claro")
-    assert avisos and "model_monitoring.py" in avisos[0]
+    assert avisos
+    assert "model_monitoring.py" in avisos[0]

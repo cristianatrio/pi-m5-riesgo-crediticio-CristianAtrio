@@ -31,8 +31,9 @@ def test_separar_target_invierte_la_etiqueta(datos):
 
 
 def test_separar_target_sin_target_falla(datos):
+    sin_target = datos.drop(columns=[fe.TARGET])
     with pytest.raises(ValueError, match=fe.TARGET):
-        fe.separar_target(datos.drop(columns=[fe.TARGET]))
+        fe.separar_target(sin_target)
 
 
 def test_dividir_train_test_estratificado(datos):

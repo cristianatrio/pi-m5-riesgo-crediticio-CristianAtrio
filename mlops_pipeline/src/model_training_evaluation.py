@@ -97,7 +97,7 @@ def definir_modelos(ratio_desbalance: float) -> dict[str, object]:
             C=0.5, class_weight="balanced", max_iter=2000, random_state=RANDOM_STATE
         ),
         "Random Forest": RandomForestClassifier(
-            n_estimators=500, max_depth=8, min_samples_leaf=20, class_weight="balanced_subsample",
+            n_estimators=500, max_depth=8, min_samples_leaf=20, max_features="sqrt", class_weight="balanced_subsample",
             n_jobs=-1, random_state=RANDOM_STATE,
         ),
         "HistGradientBoosting": HistGradientBoostingClassifier(
@@ -153,7 +153,8 @@ def probabilidades_oof(pipe: Pipeline, X, y, cv) -> tuple[np.ndarray, list[np.nd
 
 def evaluar_modelo(nombre, clasificador, X_train, y_train, X_test, y_test, cv):
     """CV (un fit por fold) + umbral OOF + ajuste final + test. Devuelve (fila, pipeline, proba_test)."""
-    pipe = Pipeline([("preprocesador", construir_preprocesador()), ("modelo", clasificador)])
+    # memory=None explicito: sin cache de transformadores (cada fold reajusta el preprocesador)
+    pipe = Pipeline([("preprocesador", construir_preprocesador()), ("modelo", clasificador)], memory=None)
     t0 = time.perf_counter()
 
     proba_oof, folds = probabilidades_oof(pipe, X_train, y_train, cv)
@@ -249,12 +250,12 @@ def importancia_variables(pipe: Pipeline, X_test, y_test) -> pd.DataFrame:
 
     Analisis post-hoc sobre test para explicar el ganador; no interviene en la seleccion.
     """
-    X_t = pipe.named_steps["preprocesador"].transform(X_test)
+    x_transformado = pipe.named_steps["preprocesador"].transform(X_test)
     res = permutation_importance(
-        pipe.named_steps["modelo"], X_t, y_test, scoring="roc_auc", n_repeats=10,
+        pipe.named_steps["modelo"], x_transformado, y_test, scoring="roc_auc", n_repeats=10,
         random_state=RANDOM_STATE, n_jobs=-1,
     )
-    imp = (pd.DataFrame({"feature": X_t.columns, "importancia": res.importances_mean, "std": res.importances_std})
+    imp = (pd.DataFrame({"feature": x_transformado.columns, "importancia": res.importances_mean, "std": res.importances_std})
            .sort_values("importancia", ascending=False))
     fig, ax = plt.subplots(figsize=(8, 7))
     sns.barplot(data=imp.head(20), x="importancia", y="feature", ax=ax, color="steelblue")

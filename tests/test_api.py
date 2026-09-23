@@ -19,7 +19,9 @@ def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
     body = r.json()
-    assert body["status"] == "ok" and body["modelo"] == "Random Forest" and 0 < body["umbral"] < 1
+    assert body["status"] == "ok"
+    assert body["modelo"] == "Random Forest"
+    assert 0 < body["umbral"] < 1
 
 
 def test_model_info(client):
@@ -69,7 +71,9 @@ def test_predict_batch(client):
     r = client.post("/predict/batch", json=lote)
     assert r.status_code == 200
     body = r.json()
-    assert body["n"] == 2 and len(body["predicciones"]) == 2 and 0 <= body["tasa_riesgo"] <= 1
+    assert body["n"] == 2
+    assert len(body["predicciones"]) == 2
+    assert 0 <= body["tasa_riesgo"] <= 1
 
 
 def test_predict_batch_vacio_422(client):
@@ -86,7 +90,8 @@ def test_error_de_datos_del_pipeline_400(client, monkeypatch):
 
     monkeypatch.setattr(model_deploy, "validar_esquema", rechaza)
     r = client.post("/predict", json=EJEMPLO_SOLICITANTE)
-    assert r.status_code == 400 and "columna rota" in r.json()["detail"]
+    assert r.status_code == 400
+    assert "columna rota" in r.json()["detail"]
 
 
 def test_fallo_de_inferencia_500_sin_traza(client, monkeypatch):
@@ -96,7 +101,8 @@ def test_fallo_de_inferencia_500_sin_traza(client, monkeypatch):
 
     monkeypatch.setitem(model_deploy.ESTADO, "modelo", ModeloRoto())
     r = client.post("/predict", json=EJEMPLO_SOLICITANTE)
-    assert r.status_code == 500 and "detalle interno" not in r.text
+    assert r.status_code == 500
+    assert "detalle interno" not in r.text
 
 
 def test_modo_degradado_503_si_no_hay_modelo(monkeypatch, tmp_path):
